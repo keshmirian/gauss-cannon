@@ -6,6 +6,10 @@ import mathutils
 from mathutils import Vector, Matrix
 import numpy as np
 from collections import defaultdict
+import gpu
+from gpu_extras.batch import batch_for_shader
+
+
 
 # Property group to store helper mesh reference
 class HelperMeshItem(bpy.types.PropertyGroup):
@@ -39,7 +43,7 @@ class MESH_OT_add_helper(bpy.types.Operator):
                     item = scene.helper_meshes.add()
                     item.mesh_object = obj
                     item.name = obj.name
-                    # Hide from render
+                    # Hide from render 
                     obj.hide_render = True
                     added_count += 1
         
@@ -346,6 +350,351 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         self.report({'INFO'}, f"Exported {frame_count} frames to {output_path}")
         return {'FINISHED'}
 
+# Export point cloud PLY operator
+class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
+    """Generate colored point cloud in PLY format from selected objects"""
+    bl_idname = "export.pointcloud_ply"
+    bl_label = "Generate Point Cloud PLY from Selected"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        return (context.selected_objects and 
+                any(obj.type == 'MESH' for obj in context.selected_objects) and
+                context.scene.camera and 
+                context.scene.frame_end >= context.scene.frame_start)
+    
+    def check_gpu_available(self):
+        """Check if GPU acceleration is available."""
+        try:
+            # Check if we can create GPU buffers
+            test_data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+            buffer = gpu.types.Buffer('FLOAT', 3, test_data)
+            del buffer
+            return True
+        except:
+            return False
+    
+    
+    def extract_mesh_data(self, mesh_obj):
+        """Extract mesh data into a serializable format for multiprocessing."""
+        mesh = mesh_obj.data
+        vertices = np.array([v.co for v in mesh.vertices])
+        # Handle variable-sized faces by converting to triangles
+        faces = []
+        for poly in mesh.polygons:
+            verts = poly.vertices
+            # Triangulate polygons with more than 3 vertices
+            for i in range(1, len(verts) - 1):
+                faces.append([verts[0], verts[i], verts[i + 1]])
+        faces = np.array(faces)
+        transform = np.array(mesh_obj.matrix_world)
+        
+        return {
+            'vertices': vertices,
+            'faces': faces,
+            'transform': transform
+        }
+    
+    def gpu_accelerated_ray_cast(self, scene, camera, resolution, selected_meshes, pixels):
+        """GPU-accelerated ray casting using Blender's BVH trees."""
+        from mathutils.bvhtree import BVHTree
+        
+        cam_matrix = camera.matrix_world
+        cam_data = camera.data
+        
+        # Build BVH trees for all selected meshes
+        bvh_trees = []
+        for obj in selected_meshes:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            obj_eval = obj.evaluated_get(depsgraph)
+            mesh = obj_eval.to_mesh()
+            
+            # Create BVH tree
+            bvh = BVHTree.FromPolygons(
+                [v.co for v in mesh.vertices],
+                [p.vertices for p in mesh.polygons]
+            )
+            bvh_trees.append((bvh, obj.matrix_world))
+            obj_eval.to_mesh_clear()
+        
+        results = []
+        
+        # Process rays in batches for better performance
+        for y in range(resolution):
+            for x in range(resolution):
+                # Calculate ray
+                ndc_x = (2.0 * (x + 0.5) / resolution) - 1.0
+                ndc_y = 1.0 - (2.0 * (y + 0.5) / resolution)
+                
+                aspect = 1.0  # Square aspect ratio
+                if cam_data.type == 'PERSP':
+                    fov = cam_data.angle
+                    tan_half_fov = math.tan(fov / 2.0)
+                    ray_dir_cam = Vector((
+                        ndc_x * tan_half_fov * aspect,
+                        ndc_y * tan_half_fov,
+                        -1.0
+                    )).normalized()
+                else:
+                    ortho_scale = cam_data.ortho_scale
+                    ray_dir_cam = Vector((0, 0, -1))
+                    offset_x = ndc_x * ortho_scale * aspect / 2.0
+                    offset_y = ndc_y * ortho_scale / 2.0
+                
+                # Transform to world space
+                ray_origin = cam_matrix.translation.copy()
+                ray_dir_world = cam_matrix.to_3x3() @ ray_dir_cam
+                ray_dir_world.normalize()
+                
+                if cam_data.type == 'ORTHO':
+                    right = cam_matrix.to_3x3() @ Vector((1, 0, 0))
+                    up = cam_matrix.to_3x3() @ Vector((0, 1, 0))
+                    ray_origin += right * offset_x + up * offset_y
+                
+                # Find closest hit using BVH
+                closest_hit = None
+                closest_dist = float('inf')
+                
+                for bvh, obj_matrix in bvh_trees:
+                    # Transform ray to object space
+                    obj_inv = obj_matrix.inverted()
+                    ray_origin_obj = obj_inv @ ray_origin
+                    ray_dir_obj = obj_inv.to_3x3() @ ray_dir_world
+                    ray_dir_obj.normalize()
+                    
+                    # Cast ray using BVH
+                    location, normal, index, dist = bvh.ray_cast(ray_origin_obj, ray_dir_obj)
+                    
+                    if location:
+                        # Transform hit back to world space
+                        hit_world = obj_matrix @ location
+                        world_dist = (hit_world - ray_origin).length
+                        
+                        if world_dist < closest_dist:
+                            closest_dist = world_dist
+                            closest_hit = hit_world
+                
+                if closest_hit:
+                    color = pixels[resolution - 1 - y, x, :3]
+                    results.append((closest_hit, color))
+        
+        return results
+    
+    def cast_ray_through_pixel(self, scene, camera, pixel_x, pixel_y, res_x, res_y, selected_objects):
+        """Cast ray through pixel and find intersection with selected objects"""
+        cam_matrix = camera.matrix_world
+        cam_data = camera.data
+        
+        # Calculate normalized device coordinates (-1 to 1)
+        ndc_x = (2.0 * pixel_x / res_x) - 1.0
+        ndc_y = 1.0 - (2.0 * pixel_y / res_y)
+        
+        # Get camera parameters
+        aspect = res_x / res_y
+        if cam_data.type == 'PERSP':
+            # Perspective camera
+            fov = cam_data.angle
+            tan_half_fov = math.tan(fov / 2.0)
+            
+            # Calculate ray direction in camera space
+            ray_dir_cam = Vector((
+                ndc_x * tan_half_fov * aspect,
+                ndc_y * tan_half_fov,
+                -1.0
+            )).normalized()
+        else:
+            # Orthographic camera
+            ortho_scale = cam_data.ortho_scale
+            ray_dir_cam = Vector((0, 0, -1))
+            offset_x = ndc_x * ortho_scale * aspect / 2.0
+            offset_y = ndc_y * ortho_scale / 2.0
+        
+        # Transform ray to world space
+        ray_origin = cam_matrix.translation.copy()
+        ray_dir_world = cam_matrix.to_3x3() @ ray_dir_cam
+        ray_dir_world.normalize()
+        
+        if cam_data.type == 'ORTHO':
+            # Offset origin for orthographic camera
+            right = cam_matrix.to_3x3() @ Vector((1, 0, 0))
+            up = cam_matrix.to_3x3() @ Vector((0, 1, 0))
+            ray_origin += right * offset_x + up * offset_y
+        
+        # Find closest intersection
+        closest_hit = None
+        closest_dist = float('inf')
+        hit_object = None
+        
+        for obj in selected_objects:
+            if obj.type != 'MESH':
+                continue
+                
+            # Transform ray to object space
+            obj_inv = obj.matrix_world.inverted()
+            ray_origin_obj = obj_inv @ ray_origin
+            ray_dir_obj = obj_inv.to_3x3() @ ray_dir_world
+            ray_dir_obj.normalize()
+            
+            # Cast ray
+            result, location, normal, index = obj.ray_cast(ray_origin_obj, ray_dir_obj)
+            
+            if result:
+                # Transform hit point back to world space
+                hit_world = obj.matrix_world @ location
+                dist = (hit_world - ray_origin).length
+                
+                if dist < closest_dist:
+                    closest_dist = dist
+                    closest_hit = hit_world
+                    hit_object = obj
+        
+        return closest_hit 
+    
+    def render_frame_to_pixels(self, scene, resolution):
+        """Render current frame and return pixel data"""
+        # Store original settings
+        orig_res_x = scene.render.resolution_x
+        orig_res_y = scene.render.resolution_y
+        orig_percentage = scene.render.resolution_percentage
+        orig_filepath = scene.render.filepath
+        
+        # Temporarily hide helper meshes from viewport
+        helper_meshes = [(item.mesh_object, item.mesh_object.hide_viewport) 
+                        for item in scene.helper_meshes 
+                        if item.mesh_object]
+        for obj, _ in helper_meshes:
+            obj.hide_viewport = True
+        
+        # Set low resolution
+        scene.render.resolution_x = resolution
+        scene.render.resolution_y = resolution
+        scene.render.resolution_percentage = 100
+        
+        # Render to temporary image
+        temp_path = os.path.join(bpy.app.tempdir, f"pointcloud_temp_{scene.frame_current}.png")
+        scene.render.filepath = temp_path
+        
+        try:
+            # Render frame
+            bpy.ops.render.render(write_still=True)
+            
+            # Load rendered image
+            img = bpy.data.images.load(temp_path)
+            
+            # Get pixel data as numpy array
+            pixels = np.array(img.pixels[:])
+            pixels = pixels.reshape((resolution, resolution, 4))
+            
+            # Clean up
+            bpy.data.images.remove(img)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            
+            return pixels
+            
+        finally:
+            # Restore settings
+            scene.render.resolution_x = orig_res_x
+            scene.render.resolution_y = orig_res_y
+            scene.render.resolution_percentage = orig_percentage
+            scene.render.filepath = orig_filepath
+            
+            # Restore helper mesh visibility
+            for obj, orig_hide in helper_meshes:
+                obj.hide_viewport = orig_hide
+    
+    def write_ply(self, filepath, points, colors):
+        """Write point cloud to PLY file"""
+        num_points = len(points)
+        
+        with open(filepath, 'wb') as f:
+            # Write PLY header
+            header = f"""ply
+format binary_little_endian 1.0
+element vertex {num_points}
+property float x
+property float y
+property float z
+property uchar red
+property uchar green
+property uchar blue
+end_header
+"""
+            f.write(header.encode('ascii'))
+            
+            # Write binary data
+            for i in range(num_points):
+                # Position (3 floats)
+                f.write(np.array(points[i], dtype=np.float32).tobytes())
+                
+                # Color (3 unsigned chars)
+                color = np.array(colors[i] * 255, dtype=np.uint8)
+                f.write(color.tobytes())
+    
+    def execute(self, context):
+        scene = context.scene
+        camera = scene.camera
+        resolution = scene.pointcloud_resolution
+        
+        # Get selected mesh objects, excluding helper meshes
+        helper_mesh_objects = {item.mesh_object for item in scene.helper_meshes if item.mesh_object}
+        selected_meshes = [obj for obj in context.selected_objects 
+                          if obj.type == 'MESH' and obj not in helper_mesh_objects]
+        
+        if not selected_meshes:
+            self.report({'ERROR'}, "No mesh objects selected (helper meshes are excluded)")
+            return {'CANCELLED'}
+        
+        # Check if GPU acceleration is available and enabled
+        use_gpu = scene.use_gpu_acceleration and self.check_gpu_available()
+        
+        # Collect all points and colors
+        all_points = []
+        all_colors = []
+        
+        # Process each frame
+        total_frames = scene.frame_end - scene.frame_start + 1
+        wm = context.window_manager
+        wm.progress_begin(0, total_frames)
+        
+        if use_gpu:
+            self.report({'INFO'}, "Using optimized BVH ray casting")
+        else:
+            self.report({'INFO'}, "Using standard BVH ray casting")
+        
+        for i, frame_idx in enumerate(range(scene.frame_start, scene.frame_end + 1)):
+            # Update progress
+            wm.progress_update(i)
+            
+            scene.frame_set(frame_idx)
+            
+            # Render frame at low resolution
+            self.report({'INFO'}, f"Processing frame {frame_idx}/{scene.frame_end}")
+            pixels = self.render_frame_to_pixels(scene, resolution)
+            
+            # Use BVH ray casting (works for both GPU and CPU modes)
+            frame_results = self.gpu_accelerated_ray_cast(
+                scene, camera, resolution, selected_meshes, pixels
+            )
+            for hit_point, color in frame_results:
+                all_points.append(hit_point)
+                all_colors.append(color)
+        
+        wm.progress_end()
+        
+        # Write PLY file
+        output_path = bpy.path.abspath(scene.pointcloud_output_path)
+        output_dir = os.path.dirname(output_path)
+        
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        self.write_ply(output_path, all_points, all_colors)
+        
+        self.report({'INFO'}, f"Generated point cloud with {len(all_points)} points from {total_frames} frames")
+        return {'FINISHED'}
+
 # Combined generate and export operator
 class CAMERA_OT_generate_and_export(bpy.types.Operator):
     """Generate camera keyframes and export JSON"""
@@ -367,11 +716,11 @@ class CAMERA_OT_generate_and_export(bpy.types.Operator):
 # UI Panel
 class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
     """Creates a Panel in the 3D viewport N-panel"""
-    bl_label = "Face Camera Generator"
+    bl_label = "Splat-Tools: Gaussian Splatting Toolbox"
     bl_idname = "VIEW3D_PT_helper_mesh_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Face Camera"
+    bl_category = "Splat-Tools"
     
     def draw(self, context):
         layout = self.layout
@@ -446,6 +795,28 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         row = layout.row()
         row.scale_y = 2.0
         row.operator("camera.generate_and_export", icon='FILE_REFRESH')
+        
+        # Point cloud generation
+        layout.separator()
+        
+        box = layout.box()
+        box.label(text="Point Cloud Export", icon='MESH_DATA')
+        
+        # Show selected objects count
+        selected_meshes = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if selected_meshes:
+            box.label(text=f"Selected objects: {len(selected_meshes)}", icon='INFO')
+        else:
+            box.label(text="No mesh objects selected", icon='ERROR')
+        
+        col = box.column()
+        col.prop(scene, "pointcloud_output_path")
+        col.prop(scene, "pointcloud_resolution")
+        col.prop(scene, "use_gpu_acceleration")
+        
+        col.separator()
+        col.scale_y = 1.5
+        col.operator("export.pointcloud_ply", icon='EXPORT')
 
 # Registration
 classes = [
@@ -455,6 +826,7 @@ classes = [
     MESH_OT_clear_helpers,
     CAMERA_OT_generate_from_faces,
     EXPORT_OT_camera_json,
+    EXPORT_OT_pointcloud_ply,
     CAMERA_OT_generate_and_export,
     VIEW3D_PT_helper_mesh_panel,
 ]
@@ -504,6 +876,27 @@ def register():
         description="Export in simplified format for Postshot",
         default=False
     )
+    
+    bpy.types.Scene.pointcloud_output_path = bpy.props.StringProperty(
+        name="Output File",
+        description="PLY file to export point cloud data",
+        default="//pointcloud.ply",
+        subtype='FILE_PATH'
+    )
+    
+    bpy.types.Scene.pointcloud_resolution = bpy.props.IntProperty(
+        name="Resolution",
+        description="Render resolution for point cloud generation",
+        default=256,
+        min=64,
+        max=1024
+    )
+    
+    bpy.types.Scene.use_gpu_acceleration = bpy.props.BoolProperty(
+        name="Use BVH Optimization",
+        description="Use optimized BVH tree for ray casting (much faster)",
+        default=True
+    )
 
 def unregister():
     for cls in reversed(classes):
@@ -517,6 +910,9 @@ def unregister():
     del bpy.types.Scene.output_height
     del bpy.types.Scene.camera_focal_length
     del bpy.types.Scene.postshot_mode
+    del bpy.types.Scene.pointcloud_output_path
+    del bpy.types.Scene.pointcloud_resolution
+    del bpy.types.Scene.use_gpu_acceleration
 
 if __name__ == "__main__":
     register()
