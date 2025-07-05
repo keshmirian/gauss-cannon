@@ -659,9 +659,9 @@ end_header
         wm.progress_begin(0, total_frames)
         
         if use_gpu:
-            self.report({'INFO'}, "Using optimized BVH ray casting")
+            self.report({'INFO'}, "Using GPU-accelerated BVH ray casting")
         else:
-            self.report({'INFO'}, "Using standard BVH ray casting")
+            self.report({'INFO'}, "Using CPU ray casting (slower fallback)")
         
         for i, frame_idx in enumerate(range(scene.frame_start, scene.frame_end + 1)):
             # Update progress
@@ -673,13 +673,28 @@ end_header
             self.report({'INFO'}, f"Processing frame {frame_idx}/{scene.frame_end}")
             pixels = self.render_frame_to_pixels(scene, resolution)
             
-            # Use BVH ray casting (works for both GPU and CPU modes)
-            frame_results = self.gpu_accelerated_ray_cast(
-                scene, camera, resolution, selected_meshes, pixels
-            )
-            for hit_point, color in frame_results:
-                all_points.append(hit_point)
-                all_colors.append(color)
+            if use_gpu:
+                # Use GPU-accelerated BVH ray casting
+                frame_results = self.gpu_accelerated_ray_cast(
+                    scene, camera, resolution, selected_meshes, pixels
+                )
+                for hit_point, color in frame_results:
+                    all_points.append(hit_point)
+                    all_colors.append(color)
+            else:
+                # Use simple CPU ray casting (fallback)
+                for y in range(resolution):
+                    for x in range(resolution):
+                        color = pixels[resolution - 1 - y, x, :3]
+                        
+                        hit_point = self.cast_ray_through_pixel(
+                            scene, camera, x + 0.5, y + 0.5, 
+                            resolution, resolution, selected_meshes
+                        )
+                        
+                        if hit_point:
+                            all_points.append(hit_point)
+                            all_colors.append(color)
         
         wm.progress_end()
         
@@ -893,8 +908,8 @@ def register():
     )
     
     bpy.types.Scene.use_gpu_acceleration = bpy.props.BoolProperty(
-        name="Use BVH Optimization",
-        description="Use optimized BVH tree for ray casting (much faster)",
+        name="Use GPU Acceleration",
+        description="Use GPU-accelerated BVH for ray casting (much faster)",
         default=True
     )
 
