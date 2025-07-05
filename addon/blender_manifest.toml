@@ -5,7 +5,7 @@ schema_version = "1.0.0"
 id = "splat_tools"
 version = "1.0.0"
 name = "Splat Tools"
-tagline = "This is another extension"
+tagline = "Splat Tools is a suite of utilities for Gaussian Splat generation in Blender."
 maintainer = "Arash Keshmirian <arash.keshmirian@gmail.com>"
 # Supported types: "add-on", "theme"
 type = "add-on"
@@ -15,7 +15,7 @@ type = "add-on"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
-tags = ["Animation", "Sequencer"]
+tags = ["Import-Export", "Render"]
 
 blender_version_min = "4.2.0"
 # # Optional: Blender version that the extension does not support, earlier versions are supported.
@@ -25,7 +25,7 @@ blender_version_min = "4.2.0"
 # License conforming to https://spdx.org/licenses/ (use "SPDX: prefix)
 # https://docs.blender.org/manual/en/dev/advanced/extensions/licenses.html
 license = [
-  "SPDX:GPL-2.0-or-later",
+  "SPDX:MIT",
 ]
 # Optional: required by some licenses.
 # copyright = [
