@@ -6,6 +6,10 @@ import mathutils
 from mathutils import Vector, Matrix
 import numpy as np
 from collections import defaultdict
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import gpu
+from gpu_extras.batch import batch_for_shader
 
 # Property group to store helper mesh reference
 class HelperMeshItem(bpy.types.PropertyGroup):
@@ -360,6 +364,220 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                 context.scene.camera and 
                 context.scene.frame_end >= context.scene.frame_start)
     
+    def check_gpu_available(self):
+        """Check if GPU acceleration is available."""
+        try:
+            # Check if we can create GPU buffers
+            test_data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+            buffer = gpu.types.Buffer('FLOAT', 3, test_data)
+            del buffer
+            return True
+        except:
+            return False
+    
+    @staticmethod
+    def process_pixel_batch(args):
+        """Process a batch of pixels in parallel. Returns list of (point, color) tuples."""
+        (pixel_coords, cam_matrix, cam_data_type, cam_angle, cam_ortho_scale, 
+         resolution, mesh_data_list, colors) = args
+        
+        results = []
+        aspect = resolution / resolution  # Square aspect ratio
+        
+        for (x, y), color in zip(pixel_coords, colors):
+            # Calculate normalized device coordinates (-1 to 1)
+            ndc_x = (2.0 * (x + 0.5) / resolution) - 1.0
+            ndc_y = 1.0 - (2.0 * (y + 0.5) / resolution)
+            
+            # Calculate ray direction
+            if cam_data_type == 'PERSP':
+                tan_half_fov = math.tan(cam_angle / 2.0)
+                ray_dir_cam = np.array([
+                    ndc_x * tan_half_fov * aspect,
+                    ndc_y * tan_half_fov,
+                    -1.0
+                ])
+                ray_dir_cam = ray_dir_cam / np.linalg.norm(ray_dir_cam)
+                offset_x = offset_y = 0
+            else:
+                ray_dir_cam = np.array([0, 0, -1])
+                offset_x = ndc_x * cam_ortho_scale * aspect / 2.0
+                offset_y = ndc_y * cam_ortho_scale / 2.0
+            
+            # Transform ray to world space
+            cam_rot = cam_matrix[:3, :3]
+            ray_origin = cam_matrix[:3, 3].copy()
+            ray_dir_world = cam_rot @ ray_dir_cam
+            ray_dir_world = ray_dir_world / np.linalg.norm(ray_dir_world)
+            
+            if cam_data_type == 'ORTHO':
+                right = cam_rot[:, 0]
+                up = cam_rot[:, 1]
+                ray_origin += right * offset_x + up * offset_y
+            
+            # Find closest intersection with all meshes
+            closest_hit = None
+            closest_dist = float('inf')
+            
+            for mesh_data in mesh_data_list:
+                vertices = mesh_data['vertices']
+                faces = mesh_data['faces']
+                transform = mesh_data['transform']
+                
+                # Transform ray to object space
+                obj_inv = np.linalg.inv(transform)
+                ray_origin_obj = obj_inv[:3, :3] @ ray_origin + obj_inv[:3, 3]
+                ray_dir_obj = obj_inv[:3, :3] @ ray_dir_world
+                ray_dir_obj = ray_dir_obj / np.linalg.norm(ray_dir_obj)
+                
+                # Simple ray-triangle intersection for each face
+                for face in faces:
+                    v0, v1, v2 = vertices[face[0]], vertices[face[1]], vertices[face[2]]
+                    
+                    # Möller–Trumbore intersection algorithm
+                    edge1 = v1 - v0
+                    edge2 = v2 - v0
+                    h = np.cross(ray_dir_obj, edge2)
+                    a = np.dot(edge1, h)
+                    
+                    if abs(a) < 1e-8:
+                        continue
+                        
+                    f = 1.0 / a
+                    s = ray_origin_obj - v0
+                    u = f * np.dot(s, h)
+                    
+                    if u < 0.0 or u > 1.0:
+                        continue
+                        
+                    q = np.cross(s, edge1)
+                    v = f * np.dot(ray_dir_obj, q)
+                    
+                    if v < 0.0 or u + v > 1.0:
+                        continue
+                        
+                    t = f * np.dot(edge2, q)
+                    
+                    if t > 1e-8:
+                        # Hit! Transform back to world space
+                        hit_local = ray_origin_obj + t * ray_dir_obj
+                        hit_world = transform[:3, :3] @ hit_local + transform[:3, 3]
+                        dist = np.linalg.norm(hit_world - ray_origin)
+                        
+                        if dist < closest_dist:
+                            closest_dist = dist
+                            closest_hit = hit_world
+            
+            if closest_hit is not None:
+                results.append((closest_hit.tolist(), color))
+        
+        return results
+    
+    def extract_mesh_data(self, mesh_obj):
+        """Extract mesh data into a serializable format for multiprocessing."""
+        mesh = mesh_obj.data
+        vertices = np.array([v.co for v in mesh.vertices])
+        # Handle variable-sized faces by converting to triangles
+        faces = []
+        for poly in mesh.polygons:
+            verts = poly.vertices
+            # Triangulate polygons with more than 3 vertices
+            for i in range(1, len(verts) - 1):
+                faces.append([verts[0], verts[i], verts[i + 1]])
+        faces = np.array(faces)
+        transform = np.array(mesh_obj.matrix_world)
+        
+        return {
+            'vertices': vertices,
+            'faces': faces,
+            'transform': transform
+        }
+    
+    def gpu_accelerated_ray_cast(self, scene, camera, resolution, selected_meshes, pixels):
+        """GPU-accelerated ray casting using Blender's BVH trees."""
+        from mathutils.bvhtree import BVHTree
+        
+        cam_matrix = camera.matrix_world
+        cam_data = camera.data
+        
+        # Build BVH trees for all selected meshes
+        bvh_trees = []
+        for obj in selected_meshes:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            obj_eval = obj.evaluated_get(depsgraph)
+            mesh = obj_eval.to_mesh()
+            
+            # Create BVH tree
+            bvh = BVHTree.FromPolygons(
+                [v.co for v in mesh.vertices],
+                [p.vertices for p in mesh.polygons]
+            )
+            bvh_trees.append((bvh, obj.matrix_world))
+            obj_eval.to_mesh_clear()
+        
+        results = []
+        
+        # Process rays in batches for better performance
+        for y in range(resolution):
+            for x in range(resolution):
+                # Calculate ray
+                ndc_x = (2.0 * (x + 0.5) / resolution) - 1.0
+                ndc_y = 1.0 - (2.0 * (y + 0.5) / resolution)
+                
+                aspect = 1.0  # Square aspect ratio
+                if cam_data.type == 'PERSP':
+                    fov = cam_data.angle
+                    tan_half_fov = math.tan(fov / 2.0)
+                    ray_dir_cam = Vector((
+                        ndc_x * tan_half_fov * aspect,
+                        ndc_y * tan_half_fov,
+                        -1.0
+                    )).normalized()
+                else:
+                    ortho_scale = cam_data.ortho_scale
+                    ray_dir_cam = Vector((0, 0, -1))
+                    offset_x = ndc_x * ortho_scale * aspect / 2.0
+                    offset_y = ndc_y * ortho_scale / 2.0
+                
+                # Transform to world space
+                ray_origin = cam_matrix.translation.copy()
+                ray_dir_world = cam_matrix.to_3x3() @ ray_dir_cam
+                ray_dir_world.normalize()
+                
+                if cam_data.type == 'ORTHO':
+                    right = cam_matrix.to_3x3() @ Vector((1, 0, 0))
+                    up = cam_matrix.to_3x3() @ Vector((0, 1, 0))
+                    ray_origin += right * offset_x + up * offset_y
+                
+                # Find closest hit using BVH
+                closest_hit = None
+                closest_dist = float('inf')
+                
+                for bvh, obj_matrix in bvh_trees:
+                    # Transform ray to object space
+                    obj_inv = obj_matrix.inverted()
+                    ray_origin_obj = obj_inv @ ray_origin
+                    ray_dir_obj = obj_inv.to_3x3() @ ray_dir_world
+                    ray_dir_obj.normalize()
+                    
+                    # Cast ray using BVH
+                    location, normal, index, dist = bvh.ray_cast(ray_origin_obj, ray_dir_obj)
+                    
+                    if location:
+                        # Transform hit back to world space
+                        hit_world = obj_matrix @ location
+                        world_dist = (hit_world - ray_origin).length
+                        
+                        if world_dist < closest_dist:
+                            closest_dist = world_dist
+                            closest_hit = hit_world
+                
+                if closest_hit:
+                    color = pixels[resolution - 1 - y, x, :3]
+                    results.append((closest_hit, color))
+        
+        return results
+    
     def cast_ray_through_pixel(self, scene, camera, pixel_x, pixel_y, res_x, res_y, selected_objects):
         """Cast ray through pixel and find intersection with selected objects"""
         cam_matrix = camera.matrix_world
@@ -525,6 +743,22 @@ end_header
             self.report({'ERROR'}, "No mesh objects selected (helper meshes are excluded)")
             return {'CANCELLED'}
         
+        # Extract mesh data for parallel processing
+        mesh_data_list = [self.extract_mesh_data(obj) for obj in selected_meshes]
+        
+        # Prepare camera data
+        cam_data = camera.data
+        cam_matrix = np.array(camera.matrix_world)
+        cam_data_type = cam_data.type
+        cam_angle = cam_data.angle if cam_data_type == 'PERSP' else 0
+        cam_ortho_scale = cam_data.ortho_scale if cam_data_type == 'ORTHO' else 0
+        
+        # Check if GPU acceleration is available and enabled
+        use_gpu = scene.use_gpu_acceleration and self.check_gpu_available()
+        
+        # Determine number of workers for CPU mode
+        num_workers = max(1, cpu_count() - 1)
+        
         # Collect all points and colors
         all_points = []
         all_colors = []
@@ -534,31 +768,73 @@ end_header
         wm = context.window_manager
         wm.progress_begin(0, total_frames)
         
+        if use_gpu:
+            self.report({'INFO'}, "Using GPU-accelerated BVH ray casting")
+        else:
+            self.report({'INFO'}, f"Using {num_workers} CPU cores for ray casting")
+        
         for i, frame_idx in enumerate(range(scene.frame_start, scene.frame_end + 1)):
             # Update progress
             wm.progress_update(i)
             
             scene.frame_set(frame_idx)
             
+            # Update camera matrix for this frame
+            cam_matrix = np.array(camera.matrix_world)
+            
             # Render frame at low resolution
             self.report({'INFO'}, f"Processing frame {frame_idx}/{scene.frame_end}")
             pixels = self.render_frame_to_pixels(scene, resolution)
             
-            # Cast rays through each pixel
-            for y in range(resolution):
-                for x in range(resolution):
-                    # Get pixel color (flip Y coordinate)
-                    color = pixels[resolution - 1 - y, x, :3]
+            if use_gpu:
+                # Use GPU-accelerated BVH ray casting
+                frame_results = self.gpu_accelerated_ray_cast(
+                    scene, camera, resolution, selected_meshes, pixels
+                )
+                for hit_point, color in frame_results:
+                    all_points.append(hit_point)
+                    all_colors.append(color)
+            else:
+                # Use CPU multiprocessing
+                # Prepare pixel batches for parallel processing
+                batch_size = max(1, (resolution * resolution) // (num_workers * 4))
+                pixel_batches = []
+                color_batches = []
+                
+                # Create batches of pixels
+                pixel_coords = []
+                colors = []
+                for y in range(resolution):
+                    for x in range(resolution):
+                        pixel_coords.append((x, y))
+                        colors.append(pixels[resolution - 1 - y, x, :3])
+                        
+                        if len(pixel_coords) >= batch_size:
+                            pixel_batches.append(pixel_coords)
+                            color_batches.append(colors)
+                            pixel_coords = []
+                            colors = []
+                
+                # Add remaining pixels
+                if pixel_coords:
+                    pixel_batches.append(pixel_coords)
+                    color_batches.append(colors)
+                
+                # Process batches in parallel
+                with Pool(processes=num_workers) as pool:
+                    batch_args = [
+                        (batch, cam_matrix, cam_data_type, cam_angle, cam_ortho_scale, 
+                         resolution, mesh_data_list, color_batch)
+                        for batch, color_batch in zip(pixel_batches, color_batches)
+                    ]
                     
-                    # Cast ray through pixel center
-                    hit_point = self.cast_ray_through_pixel(
-                        scene, camera, x + 0.5, y + 0.5, 
-                        resolution, resolution, selected_meshes
-                    )
+                    results = pool.map(self.process_pixel_batch, batch_args)
                     
-                    if hit_point:
-                        all_points.append(hit_point)
-                        all_colors.append(color)
+                    # Collect results
+                    for batch_results in results:
+                        for hit_point, color in batch_results:
+                            all_points.append(hit_point)
+                            all_colors.append(color)
         
         wm.progress_end()
         
@@ -691,6 +967,7 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         col = box.column()
         col.prop(scene, "pointcloud_output_path")
         col.prop(scene, "pointcloud_resolution")
+        col.prop(scene, "use_gpu_acceleration")
         
         col.separator()
         col.scale_y = 1.5
@@ -769,6 +1046,12 @@ def register():
         min=64,
         max=1024
     )
+    
+    bpy.types.Scene.use_gpu_acceleration = bpy.props.BoolProperty(
+        name="Use GPU Acceleration",
+        description="Use GPU-accelerated BVH for ray casting (faster but uses more memory)",
+        default=True
+    )
 
 def unregister():
     for cls in reversed(classes):
@@ -784,6 +1067,7 @@ def unregister():
     del bpy.types.Scene.postshot_mode
     del bpy.types.Scene.pointcloud_output_path
     del bpy.types.Scene.pointcloud_resolution
+    del bpy.types.Scene.use_gpu_acceleration
 
 if __name__ == "__main__":
     register()
