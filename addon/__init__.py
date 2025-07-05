@@ -625,8 +625,16 @@ end_header
             
             # Write binary data
             for i in range(num_points):
+                # Convert from Blender's Z-up to Y-up coordinate system
+                # Blender: X-right, Y-forward, Z-up
+                # Y-up: X-right, Y-up, Z-forward
+                point = points[i]
+                x = point[0]  # X stays the same
+                y = point[2]  # Blender's Z becomes Y
+                z = -point[1] # Blender's Y becomes -Z
+                
                 # Position (3 floats)
-                f.write(np.array(points[i], dtype=np.float32).tobytes())
+                f.write(np.array([x, y, z], dtype=np.float32).tobytes())
                 
                 # Color (3 unsigned chars)
                 color = np.array(colors[i] * 255, dtype=np.uint8)
