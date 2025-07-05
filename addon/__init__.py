@@ -595,7 +595,7 @@ class CAMERA_OT_generate_and_export(bpy.types.Operator):
 # UI Panel
 class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
     """Creates a Panel in the 3D viewport N-panel"""
-    bl_label = "Face Camera Generator"
+    bl_label = "Splat-Tools: Gaussian Splatting Toolbox"
     bl_idname = "VIEW3D_PT_helper_mesh_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
