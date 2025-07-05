@@ -631,7 +631,7 @@ end_header
                 point = points[i]
                 x = point[0]  # X stays the same
                 y = point[2]  # Blender's Z becomes Y
-                z = -point[1] # Blender's Y becomes -Z
+                z = point[1] # Blender's Y becomes -Z
                 
                 # Position (3 floats)
                 f.write(np.array([x, y, z], dtype=np.float32).tobytes())
@@ -671,40 +671,48 @@ end_header
         else:
             self.report({'INFO'}, "Using CPU ray casting (slower fallback)")
         
-        for i, frame_idx in enumerate(range(scene.frame_start, scene.frame_end + 1)):
-            # Update progress
-            wm.progress_update(i)
-            
-            scene.frame_set(frame_idx)
-            
-            # Render frame at low resolution
-            self.report({'INFO'}, f"Processing frame {frame_idx}/{scene.frame_end}")
-            pixels = self.render_frame_to_pixels(scene, resolution)
-            
-            if use_gpu:
-                # Use GPU-accelerated BVH ray casting
-                frame_results = self.gpu_accelerated_ray_cast(
-                    scene, camera, resolution, selected_meshes, pixels
-                )
-                for hit_point, color in frame_results:
-                    all_points.append(hit_point)
-                    all_colors.append(color)
-            else:
-                # Use simple CPU ray casting (fallback)
-                for y in range(resolution):
-                    for x in range(resolution):
-                        color = pixels[resolution - 1 - y, x, :3]
-                        
-                        hit_point = self.cast_ray_through_pixel(
-                            scene, camera, x + 0.5, y + 0.5, 
-                            resolution, resolution, selected_meshes
-                        )
-                        
-                        if hit_point:
-                            all_points.append(hit_point)
-                            all_colors.append(color)
+        # Store original persistent data setting and enable it for faster animation rendering
+        orig_persistent_data = scene.render.use_persistent_data
+        scene.render.use_persistent_data = True
         
-        wm.progress_end()
+        try:
+            for i, frame_idx in enumerate(range(scene.frame_start, scene.frame_end + 1)):
+                # Update progress
+                wm.progress_update(i)
+                
+                scene.frame_set(frame_idx)
+                
+                # Render frame at low resolution
+                self.report({'INFO'}, f"Processing frame {frame_idx}/{scene.frame_end}")
+                pixels = self.render_frame_to_pixels(scene, resolution)
+                
+                if use_gpu:
+                    # Use GPU-accelerated BVH ray casting
+                    frame_results = self.gpu_accelerated_ray_cast(
+                        scene, camera, resolution, selected_meshes, pixels
+                    )
+                    for hit_point, color in frame_results:
+                        all_points.append(hit_point)
+                        all_colors.append(color)
+                else:
+                    # Use simple CPU ray casting (fallback)
+                    for y in range(resolution):
+                        for x in range(resolution):
+                            color = pixels[resolution - 1 - y, x, :3]
+                            
+                            hit_point = self.cast_ray_through_pixel(
+                                scene, camera, x + 0.5, y + 0.5, 
+                                resolution, resolution, selected_meshes
+                            )
+                            
+                            if hit_point:
+                                all_points.append(hit_point)
+                                all_colors.append(color)
+        
+        finally:
+            # Restore original persistent data setting
+            scene.render.use_persistent_data = orig_persistent_data
+            wm.progress_end()
         
         # Write PLY file
         output_path = bpy.path.abspath(scene.pointcloud_output_path)
