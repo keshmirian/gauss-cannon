@@ -5,7 +5,6 @@ import math
 import mathutils
 from mathutils import Vector, Matrix
 import numpy as np
-from collections import defaultdict
 
 # Property group to store helper mesh reference
 class HelperMeshItem(bpy.types.PropertyGroup):
@@ -29,7 +28,6 @@ class MESH_OT_add_helper(bpy.types.Operator):
     
     def execute(self, context):
         scene = context.scene
-        added_count = 0
         
         for obj in context.selected_objects:
             if obj.type == 'MESH':
@@ -41,9 +39,7 @@ class MESH_OT_add_helper(bpy.types.Operator):
                     item.name = obj.name
                     # Hide from render
                     obj.hide_render = True
-                    added_count += 1
         
-        self.report({'INFO'}, f"Added {added_count} helper mesh(es)")
         return {'FINISHED'}
 
 # Remove helper mesh operator
@@ -111,14 +107,12 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
             scene.camera = camera
         
         # Set camera properties
-        camera.data.lens = scene.camera_focal_length
+        camera.data.lens = scene.custom_focal_length
         
         # Clear existing keyframes
-        if camera.animation_data:
-            camera.animation_data_clear()
+        camera.animation_data_clear()
         
         frame_num = 1
-        total_faces = 0
         
         # Process each helper mesh
         for helper_item in scene.helper_meshes:
@@ -136,43 +130,43 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
             
             # Process each face
             for poly in mesh.polygons:
-                # Calculate face center in local space
+                # Calculate face center in world space
                 face_center = Vector((0, 0, 0))
                 for vert_idx in poly.vertices:
                     face_center += mesh.vertices[vert_idx].co
                 face_center /= len(poly.vertices)
-                
-                # Transform to world space
                 face_center = world_matrix @ face_center
                 
-                # Get face normal in world space
+                # Get face normal in world space (pointing opposite)
                 face_normal = world_matrix.to_3x3() @ poly.normal
                 face_normal.normalize()
+                face_normal = -face_normal  # Point opposite to face normal
                 
-                # Camera looks opposite to face normal
-                look_dir = -face_normal
+                # Calculate camera orientation
+                # Forward is opposite of face normal
+                forward = face_normal
                 
-                # Calculate up vector
+                # Calculate up vector (prefer world Z up)
                 world_up = Vector((0, 0, 1))
-                right = look_dir.cross(world_up)
+                right = forward.cross(world_up)
                 
-                # Handle case where look direction is parallel to world up
+                # Handle case where forward is parallel to world up
                 if right.length < 0.001:
                     world_up = Vector((0, 1, 0))
-                    right = look_dir.cross(world_up)
+                    right = forward.cross(world_up)
                 
                 right.normalize()
-                up = right.cross(look_dir)
+                up = right.cross(forward)
                 up.normalize()
                 
                 # Create rotation matrix
                 rot_matrix = Matrix((
                     right,
                     up,
-                    -look_dir
+                    -forward  # Camera looks down negative Z
                 )).transposed()
                 
-                # Set camera location and rotation
+                # Set camera transform
                 camera.location = face_center
                 camera.rotation_euler = rot_matrix.to_euler()
                 
@@ -181,20 +175,19 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
                 camera.keyframe_insert(data_path="rotation_euler", frame=frame_num)
                 
                 frame_num += 1
-                total_faces += 1
             
             # Clean up evaluated mesh
             mesh_eval.to_mesh_clear()
         
         # Set frame range
         scene.frame_start = 1
-        scene.frame_end = max(1, frame_num - 1)
+        scene.frame_end = frame_num - 1
         
-        # Update render resolution
-        scene.render.resolution_x = scene.output_width
-        scene.render.resolution_y = scene.output_height
+        # Set render resolution
+        scene.render.resolution_x = scene.resolution_x
+        scene.render.resolution_y = scene.resolution_y
         
-        self.report({'INFO'}, f"Generated {total_faces} camera keyframes from {len(scene.helper_meshes)} helper mesh(es)")
+        self.report({'INFO'}, f"Generated {frame_num - 1} camera keyframes")
         return {'FINISHED'}
 
 # Export camera JSON operator
@@ -206,83 +199,52 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
     
     @classmethod
     def poll(cls, context):
-        return context.scene.camera and context.scene.frame_end >= context.scene.frame_start
+        return context.scene.camera and context.scene.frame_end > context.scene.frame_start
     
-    def compute_scene_bounds(self):
-        """Compute scene bounding box more efficiently"""
-        # Collect all visible mesh vertices
-        visible_meshes = [obj for obj in bpy.context.view_layer.objects 
-                         if obj.type == 'MESH' and not obj.hide_render and obj.visible_get()]
+    def calculate_scene_bounding_box(self):
+        min_x, min_y, min_z = float('inf'), float('inf'), float('inf')
+        max_x, max_y, max_z = float('-inf'), float('-inf'), float('-inf')
         
-        if not visible_meshes:
-            return 1.0  # Default scale if no visible meshes
+        for obj in bpy.context.view_layer.objects:
+            if obj.type == 'MESH' and not obj.hide_render:
+                for vert in obj.bound_box:
+                    co_world = obj.matrix_world @ Vector(vert[:])
+                    min_x = min(min_x, co_world.x)
+                    max_x = max(max_x, co_world.x)
+                    min_y = min(min_y, co_world.y)
+                    max_y = max(max_y, co_world.y)
+                    min_z = min(min_z, co_world.z)
+                    max_z = max(max_z, co_world.z)
         
-        # Use numpy for efficient min/max calculation
-        all_verts = []
-        for obj in visible_meshes:
-            world_mat = obj.matrix_world
-            # Get bounding box corners in world space
-            bbox_world = [world_mat @ Vector(corner) for corner in obj.bound_box]
-            all_verts.extend([(v.x, v.y, v.z) for v in bbox_world])
-        
-        if not all_verts:
-            return 1.0
-        
-        verts_array = np.array(all_verts)
-        bbox_min = verts_array.min(axis=0)
-        bbox_max = verts_array.max(axis=0)
-        bbox_size = bbox_max - bbox_min
-        
-        return float(np.max(bbox_size))
+        dimensions = (max_x - min_x, max_y - min_y, max_z - min_z)
+        return max(dimensions)
     
-    def extract_camera_parameters(self, camera_obj, render_settings):
-        """Extract camera parameters with optimizations"""
-        cam_data = camera_obj.data
+    def get_camera_data(self, camera, scene):
+        lens = camera.data.lens
+        sensor_width = camera.data.sensor_width
+        sensor_height = camera.data.sensor_height
         
-        # Pre-calculate common values
-        focal_mm = cam_data.lens
-        sensor_w = cam_data.sensor_width
-        sensor_h = cam_data.sensor_height
-        render_w = render_settings.resolution_x
-        render_h = render_settings.resolution_y
+        render_width_px = scene.render.resolution_x
+        render_height_px = scene.render.resolution_y
         
-        # Pixel-space focal lengths
-        fx = (focal_mm * render_w) / sensor_w
-        fy = (focal_mm * render_h) / sensor_h
+        # Calculate focal length in pixels
+        focal_length_x_px = (lens * render_width_px) / sensor_width
+        focal_length_y_px = (lens * render_height_px) / sensor_height
         
-        # Field of view (using more precise calculation)
-        fov_x = 2.0 * np.arctan(sensor_w / (2.0 * focal_mm))
-        fov_y = 2.0 * np.arctan(sensor_h / (2.0 * focal_mm))
+        # Calculate field of view
+        camera_angle_x = 2 * math.atan(sensor_width / (2 * lens))
+        camera_angle_y = 2 * math.atan(sensor_height / (2 * lens))
         
-        # Transform matrix as nested list
-        transform = [list(row) for row in camera_obj.matrix_world]
+        # Get transformation matrix
+        transform_matrix = camera.matrix_world
         
         return {
-            'focal_x': fx,
-            'focal_y': fy,
-            'fov_x': fov_x,
-            'fov_y': fov_y,
-            'transform': transform
+            "fl_x": focal_length_x_px,
+            "fl_y": focal_length_y_px,
+            "camera_angle_x": camera_angle_x,
+            "camera_angle_y": camera_angle_y,
+            "transform_matrix": [list(row) for row in transform_matrix]
         }
-    
-    def generate_frame_data(self, frame_idx, cam_params, simplified=False):
-        """Generate frame data entry"""
-        frame_entry = {
-            "transform_matrix": cam_params['transform'],
-            "file_path": f"images\\{frame_idx:04d}"
-        }
-        
-        if not simplified:
-            frame_entry.update({
-                "w": bpy.context.scene.render.resolution_x,
-                "h": bpy.context.scene.render.resolution_y,
-                "fl_x": cam_params['focal_x'],
-                "fl_y": cam_params['focal_y'],
-                "camera_angle_x": cam_params['fov_x'],
-                "camera_angle_y": cam_params['fov_y']
-            })
-        
-        return frame_entry
     
     def execute(self, context):
         scene = context.scene
@@ -292,58 +254,63 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             self.report({'ERROR'}, "No camera found in scene")
             return {'CANCELLED'}
         
-        # Calculate scene bounds
-        scene_scale = self.compute_scene_bounds()
+        # Calculate AABB scale
+        aabb_scale = self.calculate_scene_bounding_box()
         
-        # Get initial camera parameters
+        # Get camera data for first frame
         scene.frame_set(scene.frame_start)
-        initial_params = self.extract_camera_parameters(camera, scene.render)
+        cam_data = self.get_camera_data(camera, scene)
         
-        # Build output structure
-        output_json = {
-            "aabb_scale": scene_scale,
+        # Prepare output data structure
+        output_data = {
+            "aabb_scale": aabb_scale,
             "w": scene.render.resolution_x,
             "h": scene.render.resolution_y,
-            "camera_angle_x": initial_params['fov_x'],
-            "camera_angle_y": initial_params['fov_y'],
-            "cx": scene.render.resolution_x / 2.0,
-            "cy": scene.render.resolution_y / 2.0,
+            "camera_angle_x": cam_data["camera_angle_x"],
+            "camera_angle_y": cam_data["camera_angle_y"],
             "frames": []
         }
         
-        # Add focal lengths for standard mode
-        if not scene.postshot_mode:
-            output_json["fl_x"] = initial_params['focal_x']
-            output_json["fl_y"] = initial_params['focal_y']
+        # Add focal length for non-Instant-NGP/Postshot modes
+        if not (scene.optimize_postshot):
+            output_data["fl_x"] = cam_data["fl_x"]
+            output_data["fl_y"] = cam_data["fl_y"]
         
-        # Process all frames
-        frame_count = scene.frame_end - scene.frame_start + 1
-        for frame_idx in range(scene.frame_start, scene.frame_end + 1):
-            scene.frame_set(frame_idx)
-            
-            # Extract camera parameters for this frame
-            frame_params = self.extract_camera_parameters(camera, scene.render)
-            
-            # Generate frame data
-            frame_data = self.generate_frame_data(
-                frame_idx, 
-                frame_params, 
-                simplified=scene.postshot_mode
-            )
-            
-            output_json["frames"].append(frame_data)
+        # Add center point for test data
+        output_data["cx"] = scene.render.resolution_x / 2
+        output_data["cy"] = scene.render.resolution_y / 2
         
-        # Write output file
-        output_path = bpy.path.abspath(scene.json_output_path)
-        output_dir = os.path.dirname(output_path)
+        # Process each frame
+        for frame in range(scene.frame_start, scene.frame_end + 1):
+            scene.frame_set(frame)
+            cam_data = self.get_camera_data(camera, scene)
+            
+            frame_data = {
+                "transform_matrix": cam_data["transform_matrix"],
+                "file_path": f"images\\{frame:04d}"
+            }
+            
+            # Add per-frame camera parameters for non-optimized modes
+            if not (scene.optimize_postshot):
+                frame_data.update({
+                    "w": scene.render.resolution_x,
+                    "h": scene.render.resolution_y,
+                    "fl_x": cam_data["fl_x"],
+                    "fl_y": cam_data["fl_y"],
+                    "camera_angle_x": cam_data["camera_angle_x"],
+                    "camera_angle_y": cam_data["camera_angle_y"]
+                })
+            
+            output_data["frames"].append(frame_data)
         
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        # Write JSON file
+        output_path = bpy.path.abspath(scene.export_path)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
         with open(output_path, 'w') as f:
-            json.dump(output_json, f, indent=2)
+            json.dump(output_data, f, indent=4)
         
-        self.report({'INFO'}, f"Exported {frame_count} frames to {output_path}")
+        self.report({'INFO'}, f"Exported camera data to {output_path}")
         return {'FINISHED'}
 
 # Combined generate and export operator
@@ -379,9 +346,7 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         
         # Helper mesh section
         box = layout.box()
-        row = box.row()
-        row.label(text="Helper Meshes", icon='MESH_DATA')
-        row.label(text=f"({len(scene.helper_meshes)} total)")
+        box.label(text="Helper Meshes", icon='MESH_DATA')
         
         row = box.row()
         row.operator("mesh.add_helper", icon='ADD')
@@ -392,60 +357,36 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
             col = box.column()
             for i, item in enumerate(scene.helper_meshes):
                 row = col.row(align=True)
-                
-                # Show mesh status
                 if item.mesh_object:
-                    icon = 'MESH_DATA' if item.mesh_object.visible_get() else 'HIDE_ON'
-                    face_count = len(item.mesh_object.data.polygons)
-                    row.label(text=f"{item.name} ({face_count} faces)", icon=icon)
+                    row.label(text=item.name, icon='MESH_DATA')
                 else:
                     row.label(text="(Missing)", icon='ERROR')
-                
                 op = row.operator("mesh.remove_helper", text="", icon='X')
                 op.index = i
         else:
             box.label(text="No helper meshes added")
-            box.label(text="Select meshes and click '+'", icon='INFO')
-        
-        # Camera settings
-        box = layout.box()
-        box.label(text="Camera Settings", icon='CAMERA_DATA')
-        
-        col = box.column(align=True)
-        col.prop(scene, "camera_focal_length")
-        
-        row = col.row(align=True)
-        row.prop(scene, "output_width")
-        row.prop(scene, "output_height")
         
         # Export settings
         box = layout.box()
         box.label(text="Export Settings", icon='EXPORT')
         
         col = box.column()
-        col.prop(scene, "json_output_path")
-        col.prop(scene, "postshot_mode")
+        col.prop(scene, "export_path")
+        
+        row = col.row(align=True)
+        row.prop(scene, "resolution_x")
+        row.prop(scene, "resolution_y")
+
+        col.prop(scene, "custom_focal_length")
+        
+        col.prop(scene, "optimize_postshot")
         
         # Action buttons
         layout.separator()
-        
-        # Show total face count
-        total_faces = sum(len(item.mesh_object.data.polygons) 
-                         for item in scene.helper_meshes 
-                         if item.mesh_object)
-        if total_faces > 0:
-            layout.label(text=f"Total faces: {total_faces}", icon='INFO')
-        
-        col = layout.column(align=True)
-        col.scale_y = 1.5
+        col = layout.column()
         col.operator("camera.generate_from_faces", icon='CAMERA_DATA')
         col.operator("export.camera_json", icon='EXPORT')
-        
-        layout.separator()
-        
-        row = layout.row()
-        row.scale_y = 2.0
-        row.operator("camera.generate_and_export", icon='FILE_REFRESH')
+        col.operator("camera.generate_and_export", icon='FILE_REFRESH')
 
 # Registration
 classes = [
@@ -467,41 +408,40 @@ def register():
     bpy.types.Scene.helper_meshes = bpy.props.CollectionProperty(type=HelperMeshItem)
     bpy.types.Scene.helper_mesh_index = bpy.props.IntProperty(default=0)
     
-    bpy.types.Scene.json_output_path = bpy.props.StringProperty(
-        name="Output File",
-        description="JSON file to export camera data",
+    bpy.types.Scene.export_path = bpy.props.StringProperty(
+        name="Export Path",
+        description="Path to export camera JSON file",
         default="//camera_data.json",
         subtype='FILE_PATH'
     )
     
-    bpy.types.Scene.output_width = bpy.props.IntProperty(
-        name="Width",
-        description="Render width in pixels",
+    bpy.types.Scene.resolution_x = bpy.props.IntProperty(
+        name="Resolution X",
+        description="Horizontal resolution",
         default=1920,
         min=1,
-        max=16384
+        max=10000
     )
     
-    bpy.types.Scene.output_height = bpy.props.IntProperty(
-        name="Height", 
-        description="Render height in pixels",
+    bpy.types.Scene.resolution_y = bpy.props.IntProperty(
+        name="Resolution Y",
+        description="Vertical resolution",
         default=1080,
         min=1,
-        max=16384
+        max=10000
     )
     
-    bpy.types.Scene.camera_focal_length = bpy.props.FloatProperty(
-        name="Focal Length (mm)",
-        description="Camera lens focal length",
+    bpy.types.Scene.custom_focal_length = bpy.props.FloatProperty(
+        name="Focal Length",
+        description="Camera focal length in mm",
         default=35.0,
         min=1.0,
-        max=500.0,
-        precision=1
+        max=500.0
     )
     
-    bpy.types.Scene.postshot_mode = bpy.props.BoolProperty(
-        name="Postshot Compatible",
-        description="Export in simplified format for Postshot",
+    bpy.types.Scene.optimize_postshot = bpy.props.BoolProperty(
+        name="Optimize for Postshot",
+        description="Adjust export parameters for Postshot compatibility",
         default=False
     )
 
@@ -512,11 +452,11 @@ def unregister():
     # Remove properties
     del bpy.types.Scene.helper_meshes
     del bpy.types.Scene.helper_mesh_index
-    del bpy.types.Scene.json_output_path
-    del bpy.types.Scene.output_width
-    del bpy.types.Scene.output_height
-    del bpy.types.Scene.camera_focal_length
-    del bpy.types.Scene.postshot_mode
+    del bpy.types.Scene.export_path
+    del bpy.types.Scene.resolution_x
+    del bpy.types.Scene.resolution_y
+    del bpy.types.Scene.custom_focal_length
+    del bpy.types.Scene.optimize_postshot
 
 if __name__ == "__main__":
     register()
