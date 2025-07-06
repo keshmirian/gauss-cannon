@@ -631,7 +631,7 @@ end_header
                 point = points[i]
                 x = point[0]  # X stays the same
                 y = point[2]  # Blender's Z becomes Y
-                z = point[1] # Blender's Y becomes -Z
+                z = -point[1] # Blender's Y becomes -Z
                 
                 # Position (3 floats)
                 f.write(np.array([x, y, z], dtype=np.float32).tobytes())
@@ -723,7 +723,7 @@ end_header
         
         self.write_ply(output_path, all_points, all_colors)
         
-        self.report({'INFO'}, f"Generated point cloud with {len(all_points)} points from {total_frames} frames")
+        self.report({'INFO'}, f"Generated point cloud with {len(all_points)} points from {total_frames} frames (flipped-Y)")
         return {'FINISHED'}
 
 # Combined generate and export operator
