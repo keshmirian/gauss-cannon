@@ -612,8 +612,10 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                             closest_hit = hit_world
 
                 if closest_hit:
-                    color = pixels[resolution - 1 - y, x, :3]
-                    results.append((closest_hit, color))
+                    # Check if hit is beyond near clipping plane
+                    if closest_dist >= cam_data.clip_start:
+                        color = pixels[resolution - 1 - y, x, :3]
+                        results.append((closest_hit, color))
 
         return results
 
@@ -685,7 +687,10 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                     closest_hit = hit_world
                     hit_object = obj
 
-        return closest_hit
+        # Only return hit if it's beyond near clipping plane
+        if closest_hit and closest_dist >= cam_data.clip_start:
+            return closest_hit
+        return None
 
     def render_frame_to_pixels(self, scene, resolution):
         """Render current frame and return pixel data"""
