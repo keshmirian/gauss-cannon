@@ -247,6 +247,22 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
                     if self.is_camera_inside_mesh(context, offset_origin, look_dir):
                         rejected_cameras += 1
                         continue  # Skip this camera position
+                    
+                    # Check if any object is too close (within near clipping plane)
+                    near_clip = camera.data.clip_start
+                    depsgraph = context.evaluated_depsgraph_get()
+                    
+                    # Cast ray from camera position in viewing direction
+                    result, location, normal, index, object, matrix = scene.ray_cast(
+                        depsgraph, face_center, look_dir
+                    )
+                    
+                    if result:
+                        # Calculate distance to hit point
+                        distance = (location - face_center).length
+                        if distance < near_clip:
+                            rejected_cameras += 1
+                            continue  # Skip this camera position
 
                 # Set camera location and rotation
                 camera.location = face_center
