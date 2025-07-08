@@ -328,23 +328,22 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         if not visible_meshes:
             return 1.0  # Default scale if no visible meshes
 
-        # Use bounding box min/max directly instead of transforming all 8 corners
-        bbox_min = np.array([float('inf')] * 3)
-        bbox_max = np.array([float('-inf')] * 3)
-        
+        # Use numpy for efficient min/max calculation
+        all_verts = []
         for obj in visible_meshes:
-            # Get object's bounding box in world space efficiently
             world_mat = obj.matrix_world
-            obj_bbox = obj.bound_box
-            
-            # Transform only the min and max corners for efficiency
-            for corner in obj_bbox:
-                world_corner = world_mat @ Vector(corner)
-                corner_array = np.array([world_corner.x, world_corner.y, world_corner.z])
-                bbox_min = np.minimum(bbox_min, corner_array)
-                bbox_max = np.maximum(bbox_max, corner_array)
+            # Get bounding box corners in world space
+            bbox_world = [world_mat @ Vector(corner) for corner in obj.bound_box]
+            all_verts.extend([(v.x, v.y, v.z) for v in bbox_world])
 
+        if not all_verts:
+            return 1.0
+
+        verts_array = np.array(all_verts)
+        bbox_min = verts_array.min(axis=0)
+        bbox_max = verts_array.max(axis=0)
         bbox_size = bbox_max - bbox_min
+
         return float(np.max(bbox_size))
 
     def extract_camera_parameters(self, camera_obj, render_settings):
@@ -406,27 +405,12 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             self.report({"ERROR"}, "No camera found in scene")
             return {"CANCELLED"}
 
-        # Initialize progress
-        wm = context.window_manager
-        wm.progress_begin(0, 100)
-        
         # Calculate scene bounds
         scene_scale = self.compute_scene_bounds()
 
         # Get initial camera parameters
         scene.frame_set(scene.frame_start)
         initial_params = self.extract_camera_parameters(camera, scene.render)
-        
-        # Check if camera intrinsics are animated
-        cam_data = camera.data
-        intrinsics_animated = (
-            cam_data.animation_data is not None 
-            and cam_data.animation_data.action is not None
-            and any(
-                fcurve.data_path in ["lens", "sensor_width", "sensor_height"]
-                for fcurve in cam_data.animation_data.action.fcurves
-            )
-        )
 
         # Build output structure
         output_json = {
@@ -447,21 +431,11 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
 
         # Process all frames
         frame_count = scene.frame_end - scene.frame_start + 1
-        for i, frame_idx in enumerate(range(scene.frame_start, scene.frame_end + 1)):
-            # Update progress
-            progress = int((i / frame_count) * 100)
-            wm.progress_update(progress)
-            
-            scene.frame_set(frame_idx, subframe=0.0)
+        for frame_idx in range(scene.frame_start, scene.frame_end + 1):
+            scene.frame_set(frame_idx)
 
             # Extract camera parameters for this frame
-            if intrinsics_animated:
-                # Recalculate all parameters if intrinsics are animated
-                frame_params = self.extract_camera_parameters(camera, scene.render)
-            else:
-                # Only update transform matrix if intrinsics are static
-                frame_params = initial_params.copy()
-                frame_params["transform"] = [list(row) for row in camera.matrix_world]
+            frame_params = self.extract_camera_parameters(camera, scene.render)
 
             # Generate frame data
             frame_data = self.generate_frame_data(
@@ -480,9 +454,6 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         with open(output_path, "w") as f:
             json.dump(output_json, f, indent=2)
 
-        # End progress
-        wm.progress_end()
-        
         self.report({"INFO"}, f"Exported {frame_count} frames to {output_path}")
         return {"FINISHED"}
 
