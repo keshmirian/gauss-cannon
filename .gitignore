@@ -198,3 +198,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+.idea
