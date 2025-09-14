@@ -1018,16 +1018,16 @@ def register():
     bpy.types.Scene.json_output_path = bpy.props.StringProperty(
         name="Output File",
         description="JSON file to export camera data",
-        default="//camera_data.json",
+        default="camera_data.json",
         subtype="FILE_PATH",
     )
 
     bpy.types.Scene.output_width = bpy.props.IntProperty(
         name="Width",
         description="Render width in pixels",
-        default=1920,
+        default=1080,
         min=1,
-        max=16384,
+        max=3840,
     )
 
     bpy.types.Scene.output_height = bpy.props.IntProperty(
@@ -1035,7 +1035,7 @@ def register():
         description="Render height in pixels",
         default=1080,
         min=1,
-        max=16384,
+        max=3840,
     )
 
     bpy.types.Scene.camera_focal_length = bpy.props.FloatProperty(
@@ -1056,15 +1056,15 @@ def register():
     bpy.types.Scene.pointcloud_output_path = bpy.props.StringProperty(
         name="Output File",
         description="PLY file to export point cloud data",
-        default="//pointcloud.ply",
+        default="pointcloud.ply",
         subtype="FILE_PATH",
     )
 
     bpy.types.Scene.pointcloud_resolution = bpy.props.IntProperty(
         name="Resolution",
         description="Render resolution for point cloud generation",
-        default=256,
-        min=64,
+        default=16,
+        min=8,
         max=1024,
     )
 
