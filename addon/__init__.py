@@ -1088,7 +1088,7 @@ def register():
     bpy.types.Scene.json_output_path = bpy.props.StringProperty(
         name="Output File",
         description="JSON file to export camera data",
-        default="camera_data.json",
+        default="transforms_train.json",
         subtype="FILE_PATH",
     )
 
@@ -1121,11 +1121,11 @@ def register():
         name="Export Mode",
         description="Choose export format compatibility",
         items=[
-            ("STANDARD", "Standard", "Full camera parameters per frame (default NeRF format)"),
-            ("POSTSHOT", "Postshot Compatible", "Simplified format for Postshot pipeline"),
-            ("LICHTFELD", "LichtFeld Studio", "Format compatible with LichtFeld Studio loader")
+            # ("STANDARD", "Standard", "Full camera parameters per frame (default NeRF format)"),
+            ("LICHTFELD", "LichtFeld Studio", "Compatible with LichtFeld Studio"),
+            ("POSTSHOT", "Postshot", "Compatible with Postshot"),
         ],
-        default="STANDARD",
+        default="LICHTFELD",
     )
 
 
@@ -1160,7 +1160,7 @@ def register():
         name="Coordinate System",
         description="Output coordinate system for transforms and point cloud",
         items=[
-            ("Y_UP", "Y-up", "Y-up coordinate system (standard for most applications)"),
+            ("Y_UP", "Y-up", "Y-up coordinate system (Standard for most applications)"),
             ("Z_UP", "Z-up", "Z-up coordinate system (Blender native)")
         ],
         default="Y_UP",
