@@ -2,22 +2,19 @@ import bpy
 import os
 import json
 import math
-import mathutils
 from mathutils import Vector, Matrix
 import numpy as np
-from collections import defaultdict
 import gpu
-from gpu_extras.batch import batch_for_shader
 
 
 # Property group to store helper mesh reference
 class HelperMeshItem(bpy.types.PropertyGroup):
-    mesh_object: bpy.props.PointerProperty(
+    mesh_object = bpy.props.PointerProperty(
         name="Mesh Object",
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == "MESH",
     )
-    name: bpy.props.StringProperty(name="Name")
+    name = bpy.props.StringProperty(name="Name")
 
 
 # Add helper mesh operator
@@ -247,16 +244,13 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
                     if self.is_camera_inside_mesh(context, offset_origin, look_dir):
                         rejected_cameras += 1
                         continue  # Skip this camera position
-                    
                     # Check if any object is too close (within near clipping plane)
                     near_clip = camera.data.clip_start
                     depsgraph = context.evaluated_depsgraph_get()
-                    
                     # Cast ray from camera position in viewing direction
                     result, location, normal, index, object, matrix = scene.ray_cast(
                         depsgraph, face_center, look_dir
                     )
-                    
                     if result:
                         # Calculate distance to hit point
                         distance = (location - face_center).length
@@ -401,10 +395,10 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             # The transformation should be:
             # X stays X, Blender's Y becomes -Z, Blender's Z becomes Y
             conversion_matrix = Matrix([
-                [ 1,  0,  0, 0],
-                [ 0,  0,  1, 0],
-                [ 0, -1,  0, 0],
-                [ 0,  0,  0, 1]
+                [1, 0, 0, 0],
+                [0, 0, 1, 0],
+                [0, -1, 0, 0],
+                [0, 0, 0, 1]
             ])
             transform_matrix = conversion_matrix @ transform_matrix
 
@@ -544,7 +538,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             buffer = gpu.types.Buffer("FLOAT", 3, test_data)
             del buffer
             return True
-        except:
+        except Exception:
             return False
 
     def extract_mesh_data(self, mesh_obj):
@@ -694,7 +688,6 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         # Find closest intersection
         closest_hit = None
         closest_dist = float("inf")
-        hit_object = None
 
         for obj in selected_objects:
             if obj.type != "MESH":
@@ -717,7 +710,6 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                 if dist < closest_dist:
                     closest_dist = dist
                     closest_hit = hit_world
-                    hit_object = obj
 
         # Only return hit if it's beyond near clipping plane
         if closest_hit and closest_dist >= cam_data.clip_start:
@@ -1127,7 +1119,6 @@ def register():
         ],
         default="LICHTFELD",
     )
-
 
     bpy.types.Scene.pointcloud_output_path = bpy.props.StringProperty(
         name="Output File",
