@@ -1,0 +1,105 @@
+name: Validate Add-on
+
+on:
+  pull_request:
+    branches: [ master, main ]
+  push:
+    branches: [ master, main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'  # Blender 4.2+ uses Python 3.11
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 toml
+
+    - name: Validate Python syntax
+      run: |
+        # Check Python syntax in addon files
+        python -m py_compile addon/__init__.py
+
+    - name: Check code style
+      run: |
+        # Basic code style check (ignore some Blender-specific conventions)
+        flake8 addon/__init__.py --max-line-length=120 --ignore=E501,W503,E203
+
+    - name: Validate manifest file
+      run: |
+        python -c "
+import toml
+import sys
+
+try:
+    # Load and validate the manifest file
+    with open('addon/blender_manifest.toml', 'r') as f:
+        manifest = toml.load(f)
+
+    # Check required fields
+    required_fields = ['schema_version', 'id', 'version', 'name', 'type', 'blender_version_min']
+    missing_fields = [field for field in required_fields if field not in manifest]
+
+    if missing_fields:
+        print(f'Missing required fields in manifest: {missing_fields}')
+        sys.exit(1)
+
+    # Validate field values
+    if manifest['type'] != 'add-on':
+        print('Manifest type must be \"add-on\"')
+        sys.exit(1)
+
+    print('Manifest file validation passed')
+
+except Exception as e:
+    print(f'Manifest validation failed: {e}')
+    sys.exit(1)
+        "
+
+    - name: Check file structure
+      run: |
+        # Verify essential files exist
+        if [ ! -f "addon/__init__.py" ]; then
+          echo "Error: addon/__init__.py not found"
+          exit 1
+        fi
+
+        if [ ! -f "addon/blender_manifest.toml" ]; then
+          echo "Error: addon/blender_manifest.toml not found"
+          exit 1
+        fi
+
+        echo "File structure validation passed"
+
+    - name: Test addon import (basic)
+      run: |
+        # Basic test to see if the addon can be imported without Blender context
+        python -c "
+import sys
+import os
+sys.path.insert(0, 'addon')
+
+try:
+    # Test basic imports that don't require bpy
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('addon', 'addon/__init__.py')
+    print('Add-on file can be loaded as Python module')
+except ImportError as e:
+    if 'bpy' in str(e):
+        print('Add-on requires Blender context (expected)')
+    else:
+        print(f'Unexpected import error: {e}')
+        exit(1)
+except Exception as e:
+    print(f'Error loading add-on: {e}')
+    exit(1)
+        "

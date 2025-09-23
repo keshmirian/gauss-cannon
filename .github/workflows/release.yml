@@ -1,0 +1,99 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v1.2.3, etc.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Update manifest version
+      run: |
+        sed -i 's/version = ".*"/version = "${{ steps.version.outputs.VERSION }}"/' addon/blender_manifest.toml
+
+    - name: Create addon zip
+      run: |
+        # Create temporary directory for packaging
+        mkdir -p temp/splat_tools
+
+        # Copy addon files to temporary directory
+        cp -r addon/* temp/splat_tools/
+
+        # Create the zip file
+        cd temp
+        zip -r ../splat-tools-${{ steps.version.outputs.TAG }}.zip splat_tools/
+        cd ..
+
+        # Verify the zip contents
+        echo "Zip contents:"
+        unzip -l splat-tools-${{ steps.version.outputs.TAG }}.zip
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        # Get the previous tag
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+        if [ -n "$PREVIOUS_TAG" ]; then
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "## Changes since $PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "## Initial Release" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "This is the first release of Splat Tools." >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      id: create_release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.TAG }}
+        release_name: Splat Tools ${{ steps.version.outputs.TAG }}
+        body: |
+          ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+
+          ## Installation
+
+          1. Download the `splat-tools-${{ steps.version.outputs.TAG }}.zip` file below
+          2. In Blender, go to Edit → Preferences → Add-ons
+          3. Click "Install..." and select the downloaded zip file
+          4. Enable the "Splat Tools" add-on
+          5. The panel will appear in the 3D viewport's N-panel under "Splat-Tools"
+
+          ## Requirements
+
+          - Blender 4.2.0 or higher
+          - GPU support recommended for point cloud generation
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./splat-tools-${{ steps.version.outputs.TAG }}.zip
+        asset_name: splat-tools-${{ steps.version.outputs.TAG }}.zip
+        asset_content_type: application/zip
