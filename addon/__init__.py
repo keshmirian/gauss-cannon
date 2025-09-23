@@ -9,12 +9,12 @@ import gpu
 
 # Property group to store helper mesh reference
 class HelperMeshItem(bpy.types.PropertyGroup):
-    mesh_object = bpy.props.PointerProperty(
+    mesh_object: bpy.props.PointerProperty(
         name="Mesh Object",
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == "MESH",
     )
-    name = bpy.props.StringProperty(name="Name")
+    name: bpy.props.StringProperty(name="Name")
 
 
 # Add helper mesh operator
@@ -38,7 +38,14 @@ class MESH_OT_add_helper(bpy.types.Operator):
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 # Check if already in list
-                exists = any(item.mesh_object == obj for item in scene.helper_meshes)
+                exists = False
+                for item in scene.helper_meshes:
+                    try:
+                        if item.mesh_object == obj:
+                            exists = True
+                            break
+                    except (AttributeError, ReferenceError):
+                        pass
                 if not exists:
                     item = scene.helper_meshes.add()
                     item.mesh_object = obj
@@ -67,8 +74,11 @@ class MESH_OT_remove_helper(bpy.types.Operator):
         if 0 <= self.index < len(scene.helper_meshes):
             # Re-enable rendering for the mesh
             helper_item = scene.helper_meshes[self.index]
-            if helper_item.mesh_object:
-                helper_item.mesh_object.hide_render = False
+            try:
+                if helper_item.mesh_object:
+                    helper_item.mesh_object.hide_render = False
+            except (AttributeError, ReferenceError):
+                pass
 
             scene.helper_meshes.remove(self.index)
             scene.helper_mesh_index = min(
@@ -91,8 +101,11 @@ class MESH_OT_clear_helpers(bpy.types.Operator):
 
         # Re-enable rendering for all meshes
         for item in scene.helper_meshes:
-            if item.mesh_object:
-                item.mesh_object.hide_render = False
+            try:
+                if item.mesh_object:
+                    item.mesh_object.hide_render = False
+            except (AttributeError, ReferenceError):
+                pass
 
         scene.helper_meshes.clear()
         scene.helper_mesh_index = 0
@@ -117,9 +130,14 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
         scene = context.scene
 
         # Get helper mesh objects to exclude from ray casting
-        helper_objects = {
-            item.mesh_object for item in scene.helper_meshes if item.mesh_object
-        }
+        helper_objects = set()
+        for item in scene.helper_meshes:
+            try:
+                if item.mesh_object and item.mesh_object.type == "MESH":
+                    helper_objects.add(item.mesh_object)
+            except (AttributeError, ReferenceError):
+                # Skip items with deferred or invalid mesh objects
+                pass
 
         # Get all visible mesh objects in the scene, excluding helper meshes
         visible_meshes = [
@@ -725,11 +743,13 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         orig_filepath = scene.render.filepath
 
         # Temporarily hide helper meshes from viewport
-        helper_meshes = [
-            (item.mesh_object, item.mesh_object.hide_viewport)
-            for item in scene.helper_meshes
-            if item.mesh_object
-        ]
+        helper_meshes = []
+        for item in scene.helper_meshes:
+            try:
+                if item.mesh_object:
+                    helper_meshes.append((item.mesh_object, item.mesh_object.hide_viewport))
+            except (AttributeError, ReferenceError):
+                pass
         for obj, _ in helper_meshes:
             obj.hide_viewport = True
 
@@ -822,9 +842,13 @@ end_header
         resolution = scene.pointcloud_resolution
 
         # Get selected mesh objects, excluding helper meshes
-        helper_mesh_objects = {
-            item.mesh_object for item in scene.helper_meshes if item.mesh_object
-        }
+        helper_mesh_objects = set()
+        for item in scene.helper_meshes:
+            try:
+                if item.mesh_object:
+                    helper_mesh_objects.add(item.mesh_object)
+            except (AttributeError, ReferenceError):
+                pass
         selected_meshes = [
             obj
             for obj in context.selected_objects
@@ -972,12 +996,22 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
                 row = col.row(align=True)
 
                 # Show mesh status
-                if item.mesh_object:
-                    icon = "MESH_DATA" if item.mesh_object.visible_get() else "HIDE_ON"
-                    face_count = len(item.mesh_object.data.polygons)
-                    row.label(text=f"{item.name} ({face_count} faces)", icon=icon)
+                # Check if mesh_object is a valid Blender object (not a deferred property)
+                if item.mesh_object is None:
+                    row.label(text=f"{item.name} (Missing)", icon="ERROR")
                 else:
-                    row.label(text="(Missing)", icon="ERROR")
+                    try:
+                        # Try to access the object properties
+                        obj_type = item.mesh_object.type
+                        if obj_type == 'MESH' and item.mesh_object.data:
+                            icon = "MESH_DATA" if item.mesh_object.visible_get() else "HIDE_ON"
+                            face_count = len(item.mesh_object.data.polygons)
+                            row.label(text=f"{item.name} ({face_count} faces)", icon=icon)
+                        else:
+                            row.label(text=f"{item.name} (Not a mesh)", icon="ERROR")
+                    except (AttributeError, ReferenceError):
+                        # Handle case where mesh_object is deferred or deleted
+                        row.label(text=f"{item.name} (Not loaded)", icon="ERROR")
 
                 op = row.operator("mesh.remove_helper", text="", icon="X")
                 op.index = i
@@ -1011,11 +1045,14 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         layout.separator()
 
         # Show total face count
-        total_faces = sum(
-            len(item.mesh_object.data.polygons)
-            for item in scene.helper_meshes
-            if item.mesh_object
-        )
+        total_faces = 0
+        for item in scene.helper_meshes:
+            try:
+                if item.mesh_object and item.mesh_object.type == 'MESH' and item.mesh_object.data:
+                    total_faces += len(item.mesh_object.data.polygons)
+            except (AttributeError, ReferenceError):
+                # Skip items with deferred or invalid mesh objects
+                pass
         if total_faces > 0:
             layout.label(text=f"Total faces: {total_faces}", icon="INFO")
 

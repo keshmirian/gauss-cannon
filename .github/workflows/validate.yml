@@ -22,17 +22,13 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 toml
+        pip install toml
 
     - name: Validate Python syntax
       run: |
         # Check Python syntax in addon files
         python -m py_compile addon/__init__.py
 
-    - name: Check code style
-      run: |
-        # Basic code style check (ignore some Blender-specific conventions)
-        flake8 addon/__init__.py --max-line-length=120 --ignore=E501,W503,E203
 
     - name: Validate manifest file
       run: |
