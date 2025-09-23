@@ -1088,16 +1088,16 @@ def register():
     bpy.types.Scene.json_output_path = bpy.props.StringProperty(
         name="Output File",
         description="JSON file to export camera data",
-        default="//camera_data.json",
+        default="transforms_train.json",
         subtype="FILE_PATH",
     )
 
     bpy.types.Scene.output_width = bpy.props.IntProperty(
         name="Width",
         description="Render width in pixels",
-        default=1920,
+        default=1080,
         min=1,
-        max=16384,
+        max=3840,
     )
 
     bpy.types.Scene.output_height = bpy.props.IntProperty(
@@ -1105,7 +1105,7 @@ def register():
         description="Render height in pixels",
         default=1080,
         min=1,
-        max=16384,
+        max=3840,
     )
 
     bpy.types.Scene.camera_focal_length = bpy.props.FloatProperty(
@@ -1121,26 +1121,26 @@ def register():
         name="Export Mode",
         description="Choose export format compatibility",
         items=[
-            ("STANDARD", "Standard", "Full camera parameters per frame (default NeRF format)"),
-            ("POSTSHOT", "Postshot Compatible", "Simplified format for Postshot pipeline"),
-            ("LICHTFELD", "LichtFeld Studio", "Format compatible with LichtFeld Studio loader")
+            # ("STANDARD", "Standard", "Full camera parameters per frame (default NeRF format)"),
+            ("LICHTFELD", "LichtFeld Studio", "Compatible with LichtFeld Studio"),
+            ("POSTSHOT", "Postshot", "Compatible with Postshot"),
         ],
-        default="STANDARD",
+        default="LICHTFELD",
     )
 
 
     bpy.types.Scene.pointcloud_output_path = bpy.props.StringProperty(
         name="Output File",
         description="PLY file to export point cloud data",
-        default="//pointcloud.ply",
+        default="pointcloud.ply",
         subtype="FILE_PATH",
     )
 
     bpy.types.Scene.pointcloud_resolution = bpy.props.IntProperty(
         name="Resolution",
         description="Render resolution for point cloud generation",
-        default=256,
-        min=64,
+        default=16,
+        min=8,
         max=1024,
     )
 
@@ -1160,7 +1160,7 @@ def register():
         name="Coordinate System",
         description="Output coordinate system for transforms and point cloud",
         items=[
-            ("Y_UP", "Y-up", "Y-up coordinate system (standard for most applications)"),
+            ("Y_UP", "Y-up", "Y-up coordinate system (Standard for most applications)"),
             ("Z_UP", "Z-up", "Z-up coordinate system (Blender native)")
         ],
         default="Y_UP",
