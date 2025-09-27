@@ -23,31 +23,31 @@ Splat Tools is a Blender add-on for generating camera paths and point clouds for
 ## Architecture
 
 ### File Structure
-- `addon/__init__.py`: Main addon implementation (1180+ lines)
+- `addon/__init__.py`: Main addon implementation (1218 lines)
 - `addon/blender_manifest.toml`: Addon metadata and configuration
 - Main code location: All functionality in single `__init__.py` file
 
 ### Core Components
 
-1. **Property Groups** (lines 14-21)
+1. **Property Groups** (lines 11-17)
    - `HelperMeshItem`: Stores references to mesh objects used as camera position helpers
    - Properties: `mesh_object` (pointer to mesh), `name` (string)
 
-2. **Operators** (lines 24-949)
-   - `MESH_OT_add_helper`: Add mesh objects to helper list (lines 24-55)
-   - `MESH_OT_remove_helper`: Remove specific helper mesh (lines 58-82)
-   - `MESH_OT_clear_helpers`: Clear all helper meshes (lines 85-104)
-   - `CAMERA_OT_generate_from_faces`: Create camera keyframes from mesh faces (lines 107-286)
-   - `EXPORT_OT_camera_json`: Export camera data to JSON (lines 289-443)
-   - `EXPORT_OT_pointcloud_ply`: Generate colored point cloud PLY (lines 446-929)
-   - `CAMERA_OT_generate_and_export`: Combined generate + export (lines 933-949)
+2. **Operators** (lines 21-967)
+   - `MESH_OT_add_helper`: Add mesh objects to helper list (lines 21-61)
+   - `MESH_OT_remove_helper`: Remove specific helper mesh (lines 64-93)
+   - `MESH_OT_clear_helpers`: Clear all helper meshes (lines 96-118)
+   - `CAMERA_OT_generate_from_faces`: Create camera keyframes from mesh faces (lines 121-320)
+   - `EXPORT_OT_camera_json`: Export camera data to JSON (lines 323-536)
+   - `EXPORT_OT_pointcloud_ply`: Generate colored point cloud PLY (lines 539-964)
+   - `CAMERA_OT_generate_and_export`: Combined generate + export (lines 967-984)
 
-3. **UI Panel** (lines 953-1063)
+3. **UI Panel** (lines 987-1127)
    - `VIEW3D_PT_helper_mesh_panel`: Main panel in 3D viewport N-panel
    - Located under "Splat-Tools" category
    - Shows helper meshes, camera settings, export settings, and point cloud options
 
-4. **Registration** (lines 1067-1180)
+4. **Registration** (lines 1130-1218)
    - Scene properties for configuration
    - Blender registration/unregistration handlers
    - Custom properties added to bpy.types.Scene
@@ -61,23 +61,23 @@ Splat Tools is a Blender add-on for generating camera paths and point clouds for
    - Creates keyframe for each face position
    - Optional interior camera detection using odd-even ray casting rule
 
-2. **Interior Camera Detection** (`is_camera_inside_mesh`, lines 191-226):
+2. **Interior Camera Detection** (`is_camera_inside_mesh`, lines 200-235):
    - Uses odd-even rule to detect if camera is inside a mesh
    - Casts rays and counts intersections
    - Odd number of intersections = inside mesh
    - Excludes helper meshes from detection
 
 3. **Camera Export Format** (`EXPORT_OT_camera_json`):
-   - Standard mode: Full camera parameters with transform matrices
+   - LichtFeld Studio Compatible mode: Full camera parameters with transform matrices
    - Postshot Compatible mode: Simplified format for specific pipeline
-   - Lichtfeld Compatible mode: Alternative export format
+   - Standard mode: Alternative export format
    - Includes intrinsics (focal length, FOV) and extrinsics (4x4 transform matrices)
    - Computes scene AABB scale for normalization
 
 4. **Point Cloud Generation** (`EXPORT_OT_pointcloud_ply`):
-   - Renders each camera frame at low resolution
+   - Renders each camera frame at configurable resolution
    - Ray casts through each pixel to find mesh intersections
-   - Supports GPU-accelerated BVH ray casting (lines 682-753)
+   - Supports GPU-accelerated BVH ray casting (lines 697-768)
    - Exports colored PLY with configurable coordinate system (Y-up or Z-up)
 
 ### Data Flow
@@ -104,26 +104,38 @@ Splat Tools is a Blender add-on for generating camera paths and point clouds for
 ## Important Implementation Details
 
 ### Helper Mesh Management
-- Helper meshes are automatically hidden from render when added (line 50)
-- Helper meshes are excluded from point cloud generation (lines 833-840)
-- Removing helper mesh restores render visibility (line 74)
+- Helper meshes are automatically hidden from render when added (line 57)
+- Helper meshes are excluded from point cloud generation (lines 850-857)
+- Removing helper mesh restores render visibility (line 81)
 
 ### Camera Generation Specifics
-- Creates or reuses existing camera object named "Camera" (lines 153-159)
-- Sets animation keyframes with linear interpolation (lines 272-275)
-- Adjusts timeline to encompass all generated frames (lines 277-280)
+- Creates or reuses existing camera object named "Camera" (lines 162-168)
+- Sets animation keyframes with linear interpolation (lines 305-308)
+- Adjusts timeline to encompass all generated frames (lines 310-313)
 
 ### Point Cloud Processing
-- Temporary render files created in Blender's temp directory (lines 496-517)
-- Uses persistent data for faster animation rendering (lines 866-867)
-- GPU acceleration uses batch processing for efficiency (lines 682-753)
-- Coordinate conversion handled during PLY writing (lines 807-818)
+- Temporary render files created in Blender's temp directory (lines 558-579)
+- Uses persistent data for faster animation rendering (lines 883-884)
+- GPU acceleration uses batch processing for efficiency (lines 697-768)
+- Coordinate conversion handled during PLY writing (lines 824-835)
 
 ### Export Format Details
 - JSON export includes both camera intrinsics and extrinsics
 - Transform matrices use column-major ordering for compatibility
 - AABB scale computed from all mesh vertices for scene normalization
 - Postshot mode exports simplified format without certain fields
+
+### Performance Tips
+- Use low-poly meshes as helpers for faster processing (icospheres work great)
+- Enable GPU acceleration for point cloud generation
+- Start with low resolution (8-16) for testing
+- Use "persistent render data" setting for rendering speed-up
+- Helper face count - invalid cameras = camera count
+
+### Troubleshooting Common Issues
+- **No cameras generated**: Ensure helper meshes are added and have faces
+- **GPU acceleration not working**: Check Blender GPU compute settings
+- **Interior cameras still appearing**: Enable "Skip Interior Cameras" and ensure meshes are manifold
 
 ## Dependencies
 
@@ -132,3 +144,11 @@ Splat Tools is a Blender add-on for generating camera paths and point clouds for
 - `mathutils`: Blender's math utilities
 - `gpu` and `gpu_extras`: For GPU acceleration
 - Standard library: `os`, `json`, `math`, `collections.defaultdict`
+
+## Addon Configuration
+
+The addon manifest (`blender_manifest.toml`) specifies:
+- Minimum Blender version: 4.2.0
+- Required permissions: File access for writing camera/point cloud data
+- Tags: Import-Export, Render
+- License: MIT
