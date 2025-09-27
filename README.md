@@ -1,6 +1,6 @@
-# Splat Tools
+# SplatKit
 
-![Splat Tools Logo](header-logo.png)
+![SplatKit Logo](header-logo.png)
 
 > A powerful Blender add-on for Gaussian Splatting workflows - Generate camera paths and point clouds with ease
 
@@ -11,7 +11,7 @@
 
 ## 🎯 Overview
 
-**Splat Tools** is a comprehensive Blender add-on that streamlines the creation of camera paths and point clouds for Gaussian Splatting and photogrammetry workflows. It provides an intuitive interface for defining camera positions based on mesh faces and exports data in formats compatible with popular 3D reconstruction pipelines.
+**SplatKit** is a comprehensive Blender add-on that streamlines the creation of camera paths and point clouds for Gaussian Splatting and photogrammetry workflows. It provides an intuitive interface for defining camera positions based on mesh faces and exports data in formats compatible with popular 3D reconstruction pipelines.
 
 Developed by Arash Keshmirian
 
@@ -40,7 +40,7 @@ Developed by Arash Keshmirian
 - **Resolution Control**: Adjustable sampling resolution (8-1024 pixels)
 
 ### 🖥️ User Interface
-- **Integrated Panel**: Clean UI in the 3D viewport's N-panel under "Splat-Tools" tab
+- **Integrated Panel**: Clean UI in the 3D viewport's N-panel under "SplatKit" tab
 - **Real-time Feedback**: Shows face counts, camera positions, and selected objects
 - **Visual Status Indicators**: Icons show mesh visibility and selection status
 - **Batch Operations**: Combined generate & export functionality with single click
@@ -54,7 +54,7 @@ Developed by Arash Keshmirian
 1. Download the latest release from [GitHub Releases](https://github.com/keshmirian/splat-tools/releases)
 2. In Blender, go to `Edit > Preferences > Add-ons`
 3. Click `Install...` and select the downloaded `.zip` file
-4. Enable the add-on by checking the box next to "Splat-Tools"
+4. Enable the add-on by checking the box next to "SplatKit"
 
 ## 📖 Usage
 
@@ -63,7 +63,7 @@ Developed by Arash Keshmirian
 #### 1. Setup Helper Meshes
 ```
 1. Select mesh objects to use as camera position templates
-2. Click the "+" button in the Splat-Tools panel
+2. Click the "+" button in the SplatKit panel
 3. Helper meshes are automatically hidden from render
 4. View face counts and mesh status in the list
 ```
@@ -81,7 +81,7 @@ Developed by Arash Keshmirian
 2. Cameras are created at each face center
 3. Timeline adjusts automatically
 4. View rejected camera count if interior detection is enabled
-5. Camera settings from Splat-Tools are applied to camera in scene / render settings
+5. Camera settings from SplatKit are applied to camera in scene / render settings
 ```
 
 #### 4. Export Camera Data
@@ -234,7 +234,7 @@ This project is licensed under the GPL v3.0 License - see the [LICENSE](LICENSE)
 - Blender Foundation for Blender and the amazing Blender Python API
 - The Gaussian Splatting community for inspiration and feedback
 - The creators of LichtFeld Studio and PostShot
-- All contributors and users of Splat Tools
+- All contributors and users of SplatKit
 
 ## 📧 Contact
 
