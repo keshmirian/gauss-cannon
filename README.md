@@ -3,7 +3,7 @@
 > A powerful Blender add-on for Gaussian Splatting workflows. Generate your camera transforms and point clouds with ease!
 
 [![Blender Version](https://img.shields.io/badge/Blender-4.2.0%2B-orange.svg)](https://www.blender.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL_v3.0-blue.svg)](LICENSE)
 
 ![Interface Screenshot](gauss-cannon-screenshot.webp)
 
