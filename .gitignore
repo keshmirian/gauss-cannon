@@ -199,3 +199,15 @@ cython_debug/
 .cursorindexingignore
 
 .idea
+
+# VS Code files
+.vscode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+
+# Claude files
+.claude/*
