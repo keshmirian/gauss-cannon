@@ -1,28 +1,28 @@
 ![Gauss Cannon Logo](gauss-cannon-logo.webp)
 
-> A powerful Blender add-on for Gaussian Splatting workflows - Generate camera paths and point clouds with ease
+> A powerful Blender add-on for Gaussian Splatting workflows. Generate your camera transforms and point clouds with ease!
 
 [![Blender Version](https://img.shields.io/badge/Blender-4.2.0%2B-orange.svg)](https://www.blender.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-![Interface Screenshot](interface-screenshot.png)
+![Interface Screenshot](gauss-cannon-screenshot.webp)
 
-## 🎯 Overview
+## Overview
 
 **Gauss Cannon** is a comprehensive Blender add-on that streamlines the creation of camera paths and point clouds for Gaussian Splatting and photogrammetry workflows. It provides an intuitive interface for defining camera positions based on mesh faces and exports data in formats compatible with popular 3D reconstruction pipelines.
 
 Developed by Arash Keshmirian
 
-## ✨ Features
+## Features
 
-### 📷 Camera Path Generation
+### Camera Path Generation
 - **Helper Mesh System**: Use any mesh object as a template for camera positions
 - **Face-Based Camera Placement**: Automatically generates camera keyframes at each face center
 - **Smart Camera Orientation**: Cameras face opposite to face normals for optimal coverage
 - **Interior Camera Detection**: Option to skip cameras detected inside scene meshes using ray casting
 - **Near Clipping Protection**: Automatically skips cameras too close to geometry
 
-### 📁 Export Capabilities
+### Export Capabilities
 - **Multi-Format Camera Export**:
   - LichtFeld Studio compatible format (default)
   - Postshot compatible simplified format
@@ -30,31 +30,31 @@ Developed by Arash Keshmirian
 - **Scene Normalization**: Automatic AABB scale calculation for consistent processing
 - **Coordinate System Options**: Support for both Y-up and Z-up coordinate systems
 
-### 🎨 Point Cloud Generation
+### Point Cloud Generation
 - **Ray-Traced Point Clouds**: Converts selected meshes to accurately-colored PLY point clouds
 - **GPU Acceleration**: Fast BVH-accelerated ray casting for improved performance
 - **Multi-Frame Sampling**: Generates dense point clouds from multiple camera views
 - **Color Preservation**: Captures rendered colors including lighting and materials
 - **Resolution Control**: Adjustable sampling resolution (8-1024 pixels)
 
-### 🖥️ User Interface
+### User Interface
 - **Integrated Panel**: Clean UI in the 3D viewport's N-panel under "Gauss Cannon" tab
 - **Real-time Feedback**: Shows face counts, camera positions, and selected objects
 - **Visual Status Indicators**: Icons show mesh visibility and selection status
 - **Batch Operations**: Combined generate & export functionality with single click
 
-## 📋 Requirements
+## Requirements
 
 - **Blender**: 4.2.0 or higher
 
-## 🚀 Installation
+## Installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/keshmirian/splat-tools/releases)
 2. In Blender, go to `Edit > Preferences > Add-ons`
 3. Click `Install...` and select the downloaded `.zip` file
 4. Enable the add-on by checking the box next to "Gauss Cannon"
 
-## 📖 Usage
+## Usage
 
 ### Basic Workflow
 
@@ -109,7 +109,7 @@ NOTE: Point cloud export is currently accurate, but super slow. Improvement plan
 #### Batch Operations
 Use "Generate & Export" button to generate camera keyframes and export JSON data in one operation.
 
-## 📊 Technical Details
+## Technical Details
 
 ### Camera JSON Export Formats
 
@@ -173,7 +173,7 @@ Use "Generate & Export" button to generate camera keyframes and export JSON data
 - Falls back to CPU if GPU unavailable
 - Up to 10x performance improvement
 
-## 💡 Tips & Best Practices
+## Tips & Best Practices
 
 ### Performance Optimization
 - Use low-poly meshes as helpers for faster processing. Icospheres work great.
@@ -193,7 +193,7 @@ Use "Generate & Export" button to generate camera keyframes and export JSON data
 - Preview camera path before exporting
 - Test with small datasets first
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -213,7 +213,7 @@ Use "Generate & Export" button to generate camera keyframes and export JSON data
 - Check mesh normals are correct
 - Ensure meshes are manifold (watertight)
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
@@ -223,18 +223,18 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the GPL v3.0 License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Blender Foundation for Blender and the amazing Blender Python API
 - The Gaussian Splatting community for inspiration and feedback
 - The creators of LichtFeld Studio and PostShot
 - All contributors and users of Gauss Cannon
 
-## 📧 Contact
+## Contact
 
 Arash Keshmirian - [GitHub](https://github.com/keshmirian)
 
@@ -242,4 +242,4 @@ Project Link: [https://github.com/keshmirian/splat-tools](https://github.com/kes
 
 ---
 
-<p align="center">Made with ❤️ for the 3D reconstruction community</p>
+<p align="center">Made with love for the 3D reconstruction community</p>

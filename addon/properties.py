@@ -28,17 +28,17 @@ def register_properties():
     bpy.types.Scene.output_width = bpy.props.IntProperty(
         name="Width",
         description="Render width in pixels",
-        default=1080,
-        min=1,
-        max=3840,
+        default=1024,
+        min=256,
+        max=4096,
     )
 
     bpy.types.Scene.output_height = bpy.props.IntProperty(
         name="Height",
         description="Render height in pixels",
-        default=1080,
-        min=1,
-        max=3840,
+        default=1024,
+        min=256,
+        max=4096,
     )
 
     bpy.types.Scene.camera_focal_length = bpy.props.FloatProperty(
@@ -87,8 +87,8 @@ def register_properties():
     bpy.types.Scene.pointcloud_resolution = bpy.props.IntProperty(
         name="Resolution",
         description="Render resolution for point cloud generation",
-        default=16,
-        min=8,
+        default=8,
+        min=4,
         max=1024,
     )
 
