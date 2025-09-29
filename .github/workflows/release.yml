@@ -60,7 +60,7 @@ jobs:
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
           echo "## Initial Release" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "This is the first release of SplatKit." >> $GITHUB_OUTPUT
+          echo "This is the first release of Gauss Cannon." >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         fi
 
@@ -70,7 +70,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.version.outputs.TAG }}
-        name: SplatKit ${{ steps.version.outputs.TAG }}
+        name: Gauss Cannon ${{ steps.version.outputs.TAG }}
         body: |
           ${{ steps.release_notes.outputs.RELEASE_NOTES }}
 
@@ -79,8 +79,8 @@ jobs:
           1. Download the `splat-tools-${{ steps.version.outputs.TAG }}.zip` file below
           2. In Blender, go to Edit → Preferences → Add-ons
           3. Click "Install..." and select the downloaded zip file
-          4. Enable the "SplatKit" add-on
-          5. The panel will appear in the 3D viewport's N-panel under "SplatKit"
+          4. Enable the "Gauss Cannon" add-on
+          5. The panel will appear in the 3D viewport's N-panel under "Gauss Cannon"
 
           ## Requirements
 

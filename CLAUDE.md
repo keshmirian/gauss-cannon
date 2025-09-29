@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SplatKit is a Blender add-on for generating camera paths and point clouds for Gaussian Splatting workflows. It allows users to define camera positions based on mesh faces, export camera data in JSON format, and generate colored point clouds in PLY format compatible with photogrammetry pipelines.
+Gauss Cannon is a Blender add-on for generating camera paths and point clouds for Gaussian Splatting workflows. It allows users to define camera positions based on mesh faces, export camera data in JSON format, and generate colored point clouds in PLY format compatible with photogrammetry pipelines.
 
 ## Development Commands
 
@@ -17,7 +17,7 @@ SplatKit is a Blender add-on for generating camera paths and point clouds for Ga
 ### Common Development Workflows
 1. Edit code in `addon/__init__.py`
 2. In Blender: F3 > "Reload Scripts" to reload the addon
-3. Test functionality in 3D viewport > N-panel > "SplatKit" tab
+3. Test functionality in 3D viewport > N-panel > "Gauss Cannon" tab
 4. Check System Console for debug output
 
 ## Architecture
@@ -44,7 +44,7 @@ SplatKit is a Blender add-on for generating camera paths and point clouds for Ga
 
 3. **UI Panel** (lines 987-1127)
    - `VIEW3D_PT_helper_mesh_panel`: Main panel in 3D viewport N-panel
-   - Located under "SplatKit" category
+   - Located under "Gauss Cannon" category
    - Shows helper meshes, camera settings, export settings, and point cloud options
 
 4. **Registration** (lines 1130-1218)

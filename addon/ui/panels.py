@@ -4,11 +4,11 @@ import bpy
 class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
     """Creates a Panel in the 3D viewport N-panel"""
 
-    bl_label = "SplatKit: Gaussian Splatting Toolbox"
+    bl_label = "Gauss Cannon: Gaussian Splatting Toolbox"
     bl_idname = "VIEW3D_PT_helper_mesh_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "SplatKit"
+    bl_category = "Gauss Cannon"
 
     def draw(self, context):
         layout = self.layout
