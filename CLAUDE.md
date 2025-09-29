@@ -151,4 +151,4 @@ The addon manifest (`blender_manifest.toml`) specifies:
 - Minimum Blender version: 4.2.0
 - Required permissions: File access for writing camera/point cloud data
 - Tags: Import-Export, Render
-- License: MIT
+- License: GPL-v3.0
