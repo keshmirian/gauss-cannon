@@ -108,6 +108,11 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         box = layout.box()
         box.label(text="Point Cloud Export", icon="MESH_DATA")
 
+        # Warning about performance and beta status
+        warning_box = box.box()
+        warning_box.alert = True
+        warning_box.label(text="BETA: Be patient, slow.", icon="ERROR")
+
         # Show selected objects count
         selected_meshes = [
             obj for obj in context.selected_objects if obj.type == "MESH"
