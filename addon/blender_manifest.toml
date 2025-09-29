@@ -1,5 +1,5 @@
 schema_version = "1.0.0"
-id = "splat_tools"
+id = "gauss_cannon"
 version = "1.0.0"
 name = "Gauss Cannon"
 tagline = "Gauss Cannon is a suite of utilities for Gaussian Splat precursor generation in Blender."

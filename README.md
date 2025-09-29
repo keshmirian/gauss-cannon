@@ -49,7 +49,7 @@ Created/Maintained by [Arash Keshmirian](https://github.com/keshmirian)
 
 # Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/keshmirian/splat-tools/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/keshmirian/gauss-cannon/releases)
 2. In Blender, go to `Edit > Preferences > Add-ons`
 3. Click `Install...` and select the downloaded `.zip` file
 4. Enable the add-on by checking the box next to "Gauss Cannon"
@@ -238,7 +238,7 @@ This project is licensed under the GPL v3.0 License - see the [LICENSE](LICENSE)
 
 Arash Keshmirian - [GitHub](https://github.com/keshmirian)
 
-Project Link: [https://github.com/keshmirian/splat-tools](https://github.com/keshmirian/splat-tools)
+Project Link: [https://github.com/keshmirian/gauss-cannon](https://github.com/keshmirian/gauss-cannon)
 
 ---
 
