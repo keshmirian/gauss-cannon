@@ -109,11 +109,27 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             "transform": transform,
         }
 
+    def get_render_extension(self):
+        """Get file extension based on Blender's render output format"""
+        format_map = {
+            'PNG': '.png',
+            'JPEG': '.jpg',
+            'OPEN_EXR': '.exr',
+            'OPEN_EXR_MULTILAYER': '.exr',
+            'TIFF': '.tif',
+            'BMP': '.bmp',
+            'HDR': '.hdr',
+            'WEBP': '.webp',
+        }
+        file_format = bpy.context.scene.render.image_settings.file_format
+        return format_map.get(file_format, '.png')
+
     def generate_frame_data(self, frame_idx, cam_params, simplified=False):
         """Generate frame data entry"""
+        ext = self.get_render_extension()
         frame_entry = {
             "transform_matrix": cam_params["transform"],
-            "file_path": f"images/{frame_idx:04d}.png",
+            "file_path": f"images/{frame_idx:04d}{ext}",
         }
 
         if not simplified:
