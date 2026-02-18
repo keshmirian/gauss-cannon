@@ -15,21 +15,23 @@ def convert_coordinate_system(coordinate_system, transform_matrix=None, point=No
         Converted matrix or point
     """
     if coordinate_system == "Y_UP":
-        # Convert from Blender's Z-up to Y-up coordinate system
+        # Convert from Blender's Z-up to LichtFeld's -Y up coordinate system
         # Blender: X-right, Y-forward, Z-up
-        # LichtFeld: X-right, Y-up (but inverted), Z-forward
-        # This is a proper rotation (det=1) that flips the vertical axis
-        conversion_matrix = Matrix([
-            [1,  0,  0, 0],
-            [0,  0, -1, 0],
-            [0,  1,  0, 0],
-            [0,  0,  0, 1]
-        ])
+        # LichtFeld: X-right, -Y up, Z-forward
 
         if transform_matrix is not None:
-            return conversion_matrix @ transform_matrix
+            # For cameras: base conversion + 180-degree Y rotation in world space
+            # Combined transformation: rotation_y_180 @ base_conversion
+            camera_conversion = Matrix([
+                [-1,  0,  0, 0],
+                [ 0,  0, -1, 0],
+                [ 0, -1,  0, 0],
+                [ 0,  0,  0, 1]
+            ])
+            return camera_conversion @ transform_matrix
         elif point is not None:
-            # For points: X stays the same, Y' = -Z, Z' = Y
+            # For points: basic coordinate conversion only (no rotation)
+            # X stays X, Y' = -Z, Z' = Y
             return [point[0], -point[2], point[1]]
 
     # Z_UP - return unchanged
