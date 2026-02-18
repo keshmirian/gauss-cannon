@@ -17,19 +17,20 @@ def convert_coordinate_system(coordinate_system, transform_matrix=None, point=No
     if coordinate_system == "Y_UP":
         # Convert from Blender's Z-up to Y-up coordinate system
         # Blender: X-right, Y-forward, Z-up
-        # Y-up: X-right, Y-up, Z-forward
+        # LichtFeld: X-right, Y-up (but inverted), Z-forward
+        # This is a proper rotation (det=1) that flips the vertical axis
         conversion_matrix = Matrix([
-            [1, 0, 0, 0],
-            [0, 0, 1, 0],
-            [0, -1, 0, 0],
-            [0, 0, 0, 1]
+            [1,  0,  0, 0],
+            [0,  0, -1, 0],
+            [0,  1,  0, 0],
+            [0,  0,  0, 1]
         ])
 
         if transform_matrix is not None:
             return conversion_matrix @ transform_matrix
         elif point is not None:
-            # For points: X stays the same, Blender's Z becomes Y, Blender's Y becomes Z
-            return [point[0], point[2], point[1]]
+            # For points: X stays the same, Y' = -Z, Z' = Y
+            return [point[0], -point[2], point[1]]
 
     # Z_UP - return unchanged
     if transform_matrix is not None:

@@ -1,10 +1,13 @@
 import bpy
 
 
+VERSION = "1.0.0"
+
+
 class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
     """Creates a Panel in the 3D viewport N-panel"""
 
-    bl_label = "Gauss Cannon: Gaussian Splatting Toolbox"
+    bl_label = "Gauss Cannon"
     bl_idname = "VIEW3D_PT_helper_mesh_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -17,116 +20,109 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         # Helper mesh section
         box = layout.box()
         row = box.row()
-        row.label(text="Helper Meshes", icon="MESH_DATA")
-        row.label(text=f"({len(scene.helper_meshes)} total)")
+        row.label(text="Helper Meshes", icon="OUTLINER_OB_MESH")
+        if len(scene.helper_meshes) > 0:
+            # Show total face count inline
+            total_faces = 0
+            for item in scene.helper_meshes:
+                try:
+                    if item.mesh_object and item.mesh_object.type == 'MESH' and item.mesh_object.data:
+                        total_faces += len(item.mesh_object.data.polygons)
+                except (AttributeError, ReferenceError):
+                    pass
+            row.label(text=f"{len(scene.helper_meshes)} meshes, {total_faces} faces")
 
-        row = box.row()
-        row.operator("mesh.add_helper", icon="ADD")
-        row.operator("mesh.clear_helpers", icon="X")
+        row = box.row(align=True)
+        row.operator("mesh.add_helper", text="Add Selected", icon="ADD")
+        row.operator("mesh.clear_helpers", text="Clear All", icon="TRASH")
 
         # List of helper meshes
         if len(scene.helper_meshes) > 0:
-            col = box.column()
+            col = box.column(align=True)
             for i, item in enumerate(scene.helper_meshes):
                 row = col.row(align=True)
 
-                # Show mesh status
-                # Check if mesh_object is a valid Blender object (not a deferred property)
                 if item.mesh_object is None:
                     row.label(text=f"{item.name} (Missing)", icon="ERROR")
                 else:
                     try:
-                        # Try to access the object properties
                         obj_type = item.mesh_object.type
                         if obj_type == 'MESH' and item.mesh_object.data:
-                            icon = "MESH_DATA" if item.mesh_object.visible_get() else "HIDE_ON"
+                            icon = "OUTLINER_OB_MESH" if item.mesh_object.visible_get() else "HIDE_ON"
                             face_count = len(item.mesh_object.data.polygons)
-                            row.label(text=f"{item.name} ({face_count} faces)", icon=icon)
+                            row.label(text=f"{item.name} ({face_count})", icon=icon)
                         else:
-                            row.label(text=f"{item.name} (Not a mesh)", icon="ERROR")
+                            row.label(text=f"{item.name} (Invalid)", icon="ERROR")
                     except (AttributeError, ReferenceError):
-                        # Handle case where mesh_object is deferred or deleted
                         row.label(text=f"{item.name} (Not loaded)", icon="ERROR")
 
                 op = row.operator("mesh.remove_helper", text="", icon="X")
                 op.index = i
         else:
-            box.label(text="No helper meshes added")
-            box.label(text="Select meshes and click '+'", icon="INFO")
+            col = box.column()
+            col.label(text="No helper meshes added")
+            col.label(text="Select mesh objects and click 'Add Selected'", icon="INFO")
 
-        # Camera settings
+        # Camera generation section
         box = layout.box()
-        box.label(text="Camera Settings", icon="CAMERA_DATA")
+        box.label(text="Camera Generation", icon="CAMERA_DATA")
 
         col = box.column(align=True)
         col.prop(scene, "camera_focal_length")
-
         row = col.row(align=True)
         row.prop(scene, "output_width")
         row.prop(scene, "output_height")
-
         col.prop(scene, "skip_interior_cameras")
 
-        # Export settings
-        box = layout.box()
-        box.label(text="Export Settings", icon="EXPORT")
+        col.separator()
+        col.scale_y = 1.3
+        col.operator("camera.generate_from_faces", text="Generate Cameras", icon="CAMERA_DATA")
 
-        col = box.column()
+        # Export section
+        box = layout.box()
+        box.label(text="Camera Export", icon="EXPORT")
+
+        col = box.column(align=True)
         col.prop(scene, "json_output_path")
         col.prop(scene, "export_mode")
         col.prop(scene, "coordinate_system")
 
-        # Action buttons
+        col.separator()
+        col.scale_y = 1.3
+        col.operator("export.camera_json", text="Export Camera JSON", icon="FILE_TEXT")
+
+        # Combined action
         layout.separator()
-
-        # Show total face count
-        total_faces = 0
-        for item in scene.helper_meshes:
-            try:
-                if item.mesh_object and item.mesh_object.type == 'MESH' and item.mesh_object.data:
-                    total_faces += len(item.mesh_object.data.polygons)
-            except (AttributeError, ReferenceError):
-                # Skip items with deferred or invalid mesh objects
-                pass
-        if total_faces > 0:
-            layout.label(text=f"Total faces: {total_faces}", icon="INFO")
-
-        col = layout.column(align=True)
-        col.scale_y = 1.5
-        col.operator("camera.generate_from_faces", icon="CAMERA_DATA")
-        col.operator("export.camera_json", icon="EXPORT")
-
-        layout.separator()
-
         row = layout.row()
-        row.scale_y = 2.0
-        row.operator("camera.generate_and_export", icon="FILE_REFRESH")
+        row.scale_y = 1.8
+        row.operator("camera.generate_and_export", text="Generate & Export All", icon="FILE_REFRESH")
 
-        # Point cloud generation
+        # Point cloud section
         layout.separator()
-
         box = layout.box()
-        box.label(text="Point Cloud Export", icon="MESH_DATA")
-
-        # Warning about performance and beta status
-        warning_box = box.box()
-        warning_box.alert = True
-        warning_box.label(text="BETA: Be patient, slow.", icon="ERROR")
+        box.label(text="Point Cloud", icon="OUTLINER_OB_POINTCLOUD")
 
         # Show selected objects count
         selected_meshes = [
             obj for obj in context.selected_objects if obj.type == "MESH"
         ]
         if selected_meshes:
-            box.label(text=f"Selected objects: {len(selected_meshes)}", icon="INFO")
+            box.label(text=f"{len(selected_meshes)} mesh(es) selected", icon="CHECKMARK")
         else:
-            box.label(text="No mesh objects selected", icon="ERROR")
+            box.label(text="Select mesh objects to scan", icon="INFO")
 
-        col = box.column()
+        col = box.column(align=True)
         col.prop(scene, "pointcloud_output_path")
         col.prop(scene, "pointcloud_resolution")
         col.prop(scene, "use_gpu_acceleration")
 
         col.separator()
-        col.scale_y = 1.5
-        col.operator("export.pointcloud_ply", icon="EXPORT")
+        col.scale_y = 1.3
+        col.operator("export.pointcloud_ply", text="Generate Point Cloud", icon="OUTLINER_OB_POINTCLOUD")
+
+        # Footer with version
+        layout.separator()
+        row = layout.row()
+        row.alignment = 'RIGHT'
+        row.scale_y = 0.7
+        row.label(text=f"v{VERSION}")
