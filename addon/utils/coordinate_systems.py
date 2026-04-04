@@ -31,8 +31,8 @@ def convert_coordinate_system(coordinate_system, transform_matrix=None, point=No
             return camera_conversion @ transform_matrix
         elif point is not None:
             # For points: basic coordinate conversion only (no rotation)
-            # X stays X, Y' = Z, Z' = Y
-            return [point[0], point[2], point[1]]
+            # X stays X, Y' = Z, Z' = -Y
+            return [point[0], point[2], -point[1]]
 
     # Z_UP - return unchanged
     if transform_matrix is not None:
