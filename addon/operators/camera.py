@@ -1,4 +1,5 @@
 import bpy
+import os
 from mathutils import Vector, Matrix
 from ..utils.ray_casting import is_camera_inside_mesh
 
@@ -135,9 +136,11 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
         scene.frame_start = 1
         scene.frame_end = max(1, frame_num - 1)
 
-        # Update render resolution
+        # Update render settings
         scene.render.resolution_x = scene.output_width
         scene.render.resolution_y = scene.output_height
+        output_dir = bpy.path.abspath(scene.output_folder)
+        scene.render.filepath = os.path.join(output_dir, "images", "")
 
         # Report results
         if scene.skip_interior_cameras and rejected_cameras > 0:
@@ -154,20 +157,32 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class CAMERA_OT_generate_and_export(bpy.types.Operator):
-    """Generate camera keyframes and export JSON"""
+class RENDER_OT_animation_to_export(bpy.types.Operator):
+    """Render animation to the export output folder"""
 
-    bl_idname = "camera.generate_and_export"
-    bl_label = "Generate & Export"
-    bl_options = {"REGISTER", "UNDO"}
+    bl_idname = "render.animation_to_export"
+    bl_label = "Render Animation"
+    bl_options = {"REGISTER"}
 
     @classmethod
     def poll(cls, context):
-        return len(context.scene.helper_meshes) > 0
+        return (
+            context.scene.camera
+            and context.scene.frame_end >= context.scene.frame_start
+        )
 
     def execute(self, context):
-        # Generate keyframes
-        bpy.ops.camera.generate_from_faces()
-        # Export JSON
-        bpy.ops.export.camera_json()
+        scene = context.scene
+
+        # Set render output to images subfolder
+        output_dir = bpy.path.abspath(scene.output_folder)
+        images_dir = os.path.join(output_dir, "images")
+        if not os.path.exists(images_dir):
+            os.makedirs(images_dir)
+
+        scene.render.filepath = os.path.join(images_dir, "")
+
+        # INVOKE_DEFAULT opens the render window with progress, like Render > Render Animation
+        bpy.ops.render.render('INVOKE_DEFAULT', animation=True)
+
         return {"FINISHED"}

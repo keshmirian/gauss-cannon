@@ -27,6 +27,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
     _resolution = 8
     _orig_persistent_data = False
     _orig_frame = 0
+    _stride = 1
     _is_running = False
     _start_time = 0
 
@@ -154,9 +155,10 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         self._frame_start = scene.frame_start
         self._frame_end = scene.frame_end
         self._frame_idx = self._frame_start
-        self._total_frames = self._frame_end - self._frame_start + 1
+        self._total_frames = len(range(self._frame_start, self._frame_end + 1, self._stride))
         self._all_points = []
         self._all_colors = []
+        self._stride = scene.pointcloud_stride
         self._use_gpu = scene.use_gpu_acceleration and self.check_gpu_available()
         self._orig_frame = scene.frame_current
 
@@ -194,7 +196,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                 return self.finish(context)
 
             # Update progress in header
-            frames_done = self._frame_idx - self._frame_start
+            frames_done = (self._frame_idx - self._frame_start) // self._stride
             frames_remaining = self._total_frames - frames_done
             progress_pct = int((frames_done / self._total_frames) * 100)
 
@@ -243,7 +245,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                             self._all_points.append(hit_point)
                             self._all_colors.append(color)
 
-            self._frame_idx += 1
+            self._frame_idx += self._stride
 
         return {"RUNNING_MODAL"}
 
@@ -263,11 +265,10 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         EXPORT_OT_pointcloud_ply._is_running = False
 
         # Write PLY file
-        output_path = bpy.path.abspath(scene.pointcloud_output_path)
-        output_dir = os.path.dirname(output_path)
-
-        if output_dir and not os.path.exists(output_dir):
+        output_dir = bpy.path.abspath(scene.output_folder)
+        if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+        output_path = os.path.join(output_dir, "pointcloud.ply")
 
         self.write_ply(output_path, self._all_points, self._all_colors, scene.coordinate_system)
 

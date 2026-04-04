@@ -9,7 +9,7 @@ from .operators import (
     MESH_OT_remove_helper,
     MESH_OT_clear_helpers,
     CAMERA_OT_generate_from_faces,
-    CAMERA_OT_generate_and_export,
+    RENDER_OT_animation_to_export,
     EXPORT_OT_camera_json,
     EXPORT_OT_pointcloud_ply,
 )
@@ -27,7 +27,7 @@ classes = [
     MESH_OT_remove_helper,
     MESH_OT_clear_helpers,
     CAMERA_OT_generate_from_faces,
-    CAMERA_OT_generate_and_export,
+    RENDER_OT_animation_to_export,
     EXPORT_OT_camera_json,
     EXPORT_OT_pointcloud_ply,
 

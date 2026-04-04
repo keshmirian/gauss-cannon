@@ -1,13 +1,13 @@
 import bpy
 
 
-VERSION = "1.0.2"
+VERSION = "1.1.0"
 
 
 class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
     """Creates a Panel in the 3D viewport N-panel"""
 
-    bl_label = "Gauss Cannon"
+    bl_label = f"Gauss Cannon v{VERSION}"
     bl_idname = "VIEW3D_PT_helper_mesh_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -22,7 +22,6 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         row = box.row()
         row.label(text="Helper Meshes", icon="OUTLINER_OB_MESH")
         if len(scene.helper_meshes) > 0:
-            # Show total face count inline
             total_faces = 0
             for item in scene.helper_meshes:
                 try:
@@ -36,7 +35,6 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         row.operator("mesh.add_helper", text="Add Selected", icon="ADD")
         row.operator("mesh.clear_helpers", text="Clear All", icon="TRASH")
 
-        # List of helper meshes
         if len(scene.helper_meshes) > 0:
             col = box.column(align=True)
             for i, item in enumerate(scene.helper_meshes):
@@ -63,9 +61,17 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
             col.label(text="No helper meshes added")
             col.label(text="Select mesh objects and click 'Add Selected'", icon="INFO")
 
-        # Camera generation section
+        # Output folder
         box = layout.box()
-        box.label(text="Camera Generation", icon="CAMERA_DATA")
+        box.label(text="Output", icon="FILE_FOLDER")
+        col = box.column(align=True)
+        col.prop(scene, "output_folder")
+        col.prop(scene, "export_mode")
+        col.prop(scene, "coordinate_system")
+
+        # Step 1: Camera Generation
+        box = layout.box()
+        box.label(text="Step 1: Camera Generation", icon="CAMERA_DATA")
 
         col = box.column(align=True)
         col.prop(scene, "camera_focal_length")
@@ -78,51 +84,47 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         col.scale_y = 1.3
         col.operator("camera.generate_from_faces", text="Generate Cameras", icon="CAMERA_DATA")
 
-        # Export section
+        # Step 2: Camera Export
         box = layout.box()
-        box.label(text="Camera Export", icon="EXPORT")
+        box.label(text="Step 2: Camera Export", icon="EXPORT")
 
         col = box.column(align=True)
-        col.prop(scene, "json_output_path")
-        col.prop(scene, "export_mode")
-        col.prop(scene, "coordinate_system")
-
-        col.separator()
         col.scale_y = 1.3
         col.operator("export.camera_json", text="Export Camera JSON", icon="FILE_TEXT")
 
-        # Combined action
-        layout.separator()
-        row = layout.row()
-        row.scale_y = 1.8
-        row.operator("camera.generate_and_export", text="Generate & Export All", icon="FILE_REFRESH")
-
-        # Point cloud section
-        layout.separator()
+        # Step 3: Point Cloud
         box = layout.box()
-        box.label(text="Point Cloud", icon="OUTLINER_OB_POINTCLOUD")
+        box.label(text="Step 3: Point Cloud", icon="OUTLINER_OB_POINTCLOUD")
 
-        # Show selected objects count
         selected_meshes = [
             obj for obj in context.selected_objects if obj.type == "MESH"
         ]
-        if selected_meshes:
-            box.label(text=f"{len(selected_meshes)} mesh(es) selected", icon="CHECKMARK")
-        else:
-            box.label(text="Select mesh objects to scan", icon="INFO")
 
         col = box.column(align=True)
-        col.prop(scene, "pointcloud_output_path")
         col.prop(scene, "pointcloud_resolution")
+        col.prop(scene, "pointcloud_stride")
         col.prop(scene, "use_gpu_acceleration")
 
         col.separator()
         col.scale_y = 1.3
         col.operator("export.pointcloud_ply", text="Generate Point Cloud", icon="OUTLINER_OB_POINTCLOUD")
 
-        # Footer with version
-        layout.separator()
-        row = layout.row()
-        row.alignment = 'RIGHT'
-        row.scale_y = 0.7
-        row.label(text=f"v{VERSION}")
+        if selected_meshes:
+            box.label(text=f"{len(selected_meshes)} mesh(es) selected", icon="CHECKMARK")
+        else:
+            box.label(text="Select the meshes to scan in the viewport", icon="INFO")
+
+        # Step 4: Render Animation
+        box = layout.box()
+        box.label(text="Step 4: Render Animation", icon="RENDER_ANIMATION")
+
+        col = box.column(align=True)
+        col.prop(scene.render, "engine")
+        if scene.render.engine == 'CYCLES':
+            col.prop(scene.cycles, "device")
+            col.prop(scene.render, "use_persistent_data")
+
+        col.separator()
+        col.scale_y = 1.3
+        col.operator("render.animation_to_export", text="Render Animation", icon="RENDER_ANIMATION")
+

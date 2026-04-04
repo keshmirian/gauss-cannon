@@ -212,11 +212,10 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             output_json["frames"].append(frame_data)
 
         # Write output file
-        output_path = bpy.path.abspath(scene.json_output_path)
-        output_dir = os.path.dirname(output_path)
-
-        if output_dir and not os.path.exists(output_dir):
+        output_dir = bpy.path.abspath(scene.output_folder)
+        if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+        output_path = os.path.join(output_dir, "transforms.json")
 
         with open(output_path, "w") as f:
             json.dump(output_json, f, indent=2)

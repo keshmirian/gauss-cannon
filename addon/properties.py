@@ -17,12 +17,12 @@ def register_properties():
     bpy.types.Scene.helper_meshes = bpy.props.CollectionProperty(type=HelperMeshItem)
     bpy.types.Scene.helper_mesh_index = bpy.props.IntProperty(default=0)
 
-    # Camera JSON export settings
-    bpy.types.Scene.json_output_path = bpy.props.StringProperty(
-        name="Output File",
-        description="JSON file to export camera data",
-        default="transforms_train.json",
-        subtype="FILE_PATH",
+    # Shared output folder
+    bpy.types.Scene.output_folder = bpy.props.StringProperty(
+        name="Output Folder",
+        description="Folder for all exports (transforms.json, pointcloud.ply, images/)",
+        default="",
+        subtype="DIR_PATH",
     )
 
     bpy.types.Scene.output_width = bpy.props.IntProperty(
@@ -77,19 +77,20 @@ def register_properties():
     )
 
     # Point cloud export settings
-    bpy.types.Scene.pointcloud_output_path = bpy.props.StringProperty(
-        name="Output File",
-        description="PLY file to export point cloud data",
-        default="pointcloud.ply",
-        subtype="FILE_PATH",
-    )
-
     bpy.types.Scene.pointcloud_resolution = bpy.props.IntProperty(
-        name="Resolution",
-        description="Render resolution for point cloud generation",
+        name="Ray Density",
+        description="NxN grid of rays cast per camera frame for point cloud generation",
         default=8,
         min=4,
         max=1024,
+    )
+
+    bpy.types.Scene.pointcloud_stride = bpy.props.IntProperty(
+        name="Stride",
+        description="Use every Nth frame for point cloud generation (higher values = faster, fewer points)",
+        default=1,
+        min=1,
+        max=100,
     )
 
     bpy.types.Scene.use_gpu_acceleration = bpy.props.BoolProperty(
@@ -103,13 +104,13 @@ def unregister_properties():
     """Unregister all scene properties"""
     del bpy.types.Scene.helper_meshes
     del bpy.types.Scene.helper_mesh_index
-    del bpy.types.Scene.json_output_path
+    del bpy.types.Scene.output_folder
     del bpy.types.Scene.output_width
     del bpy.types.Scene.output_height
     del bpy.types.Scene.camera_focal_length
     del bpy.types.Scene.export_mode
-    del bpy.types.Scene.pointcloud_output_path
     del bpy.types.Scene.pointcloud_resolution
     del bpy.types.Scene.use_gpu_acceleration
+    del bpy.types.Scene.pointcloud_stride
     del bpy.types.Scene.skip_interior_cameras
     del bpy.types.Scene.coordinate_system
