@@ -169,6 +169,7 @@ class RENDER_OT_animation_to_export(bpy.types.Operator):
         return (
             context.scene.camera
             and context.scene.frame_end >= context.scene.frame_start
+            and context.scene.output_folder.strip()
         )
 
     def execute(self, context):

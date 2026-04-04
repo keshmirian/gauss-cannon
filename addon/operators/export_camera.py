@@ -18,6 +18,7 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         return (
             context.scene.camera
             and context.scene.frame_end >= context.scene.frame_start
+            and context.scene.output_folder.strip()
         )
 
     def compute_scene_bounds(self):

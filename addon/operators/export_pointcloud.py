@@ -38,6 +38,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             and any(obj.type == "MESH" for obj in context.selected_objects)
             and context.scene.camera
             and context.scene.frame_end >= context.scene.frame_start
+            and context.scene.output_folder.strip()
             and not cls._is_running
         )
 
@@ -155,10 +156,10 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         self._frame_start = scene.frame_start
         self._frame_end = scene.frame_end
         self._frame_idx = self._frame_start
+        self._stride = scene.pointcloud_stride
         self._total_frames = len(range(self._frame_start, self._frame_end + 1, self._stride))
         self._all_points = []
         self._all_colors = []
-        self._stride = scene.pointcloud_stride
         self._use_gpu = scene.use_gpu_acceleration and self.check_gpu_available()
         self._orig_frame = scene.frame_current
 

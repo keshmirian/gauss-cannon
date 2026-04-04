@@ -69,6 +69,10 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         col.prop(scene, "export_mode")
         col.prop(scene, "coordinate_system")
 
+        if not scene.output_folder.strip():
+            layout.label(text="Set an output folder to continue", icon="INFO")
+            return
+
         # Step 1: Camera Generation
         box = layout.box()
         box.label(text="Step 1: Camera Generation", icon="CAMERA_DATA")
