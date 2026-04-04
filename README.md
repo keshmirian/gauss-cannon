@@ -34,14 +34,21 @@ Created/Maintained by [Arash Keshmirian](https://github.com/keshmirian)
 - **Ray-Traced Point Clouds**: Converts selected meshes to accurately-colored PLY point clouds
 - **GPU Acceleration**: Fast BVH-accelerated ray casting for improved performance
 - **Multi-Frame Sampling**: Generates dense point clouds from multiple camera views
+- **Stride Control**: Use every Nth frame for faster generation with fewer points
 - **Color Preservation**: Captures rendered colors including lighting and materials
-- **Resolution Control**: Adjustable sampling resolution (8-1024 pixels)
+- **Ray Density Control**: Adjustable NxN ray grid per frame (4-1024)
+
+## Render Animation
+- **Integrated Rendering**: Render animation directly from the Gauss Cannon panel
+- **Engine Selection**: Choose render engine with Cycles-specific device and persistent data options
+- **Native Render Window**: Opens Blender's render progress window with ESC-to-cancel
 
 ## User Interface
+- **Step-by-Step Workflow**: Clear Steps 1–4 guide you through the full pipeline
+- **Unified Output Folder**: Single folder for all exports (`transforms.json`, `pointcloud.ply`, `images/`)
 - **Integrated Panel**: Clean UI in the 3D viewport's N-panel under "Gauss Cannon" tab
 - **Real-time Feedback**: Shows face counts, camera positions, and selected objects
 - **Visual Status Indicators**: Icons show mesh visibility and selection status
-- **Batch Operations**: Combined generate & export functionality with single click
 
 # Requirements
 
@@ -61,53 +68,50 @@ Created/Maintained by [Arash Keshmirian](https://github.com/keshmirian)
 ### 1. Setup Helper Meshes
 ```
 1. Select mesh objects to use as camera position templates
-2. Click the "+" button in the Gauss Cannon panel
+2. Click "Add Selected" in the Gauss Cannon panel
 3. Helper meshes are automatically hidden from render
 4. View face counts and mesh status in the list
 ```
 
-### 2. Configure Camera Settings
+### 2. Configure Output
 ```
-- Focal Length: 1-500mm (default: 35mm)
-- Resolution: Width × Height (default: 1080×1080)
-- Skip Interior Cameras: Enable to avoid cameras inside meshes
+1. Set the output folder (all exports go here)
+2. Choose export mode (LichtFeld Studio or Postshot)
+3. Select coordinate system (Y-up or Z-up)
 ```
 
-### 3. Generate Camera Path
+### 3. Generate Camera Path (Step 1)
 ```
-1. Click "Generate Camera Keyframes"
-2. Cameras are created at each face center
-3. Timeline adjusts automatically
-4. View rejected camera count if interior detection is enabled
-5. Camera settings from Gauss Cannon are applied to camera in scene / render settings
+1. Configure focal length, resolution, and interior camera detection
+2. Click "Generate Cameras"
+3. Cameras are created at each face center
+4. Timeline and render settings are updated automatically
 ```
 
 ### 4. Export Camera Data
 ```
-1. Set output JSON path
-2. Choose export mode:
-   - LichtFeld Studio
-   - Postshot
-3. Select coordinate system (Y-up or Z-up)
-4. Click "Export Camera JSON"
+1. Click "Export Camera JSON"
+2. transforms.json is saved to your output folder
 ```
 
-### Advanced Features
-
-### Point Cloud Export
+### 5. Generate Point Cloud
 ```
-1. Select target meshes (excluding helper meshes)
+1. Select target meshes in the viewport (excluding helper meshes)
 2. Configure settings:
-   - Output PLY path
-   - Resolution: 8-1024 (default: 16)
+   - Ray Density: 4-1024 (default: 8)
+   - Stride: Use every Nth frame (default: 1)
    - GPU acceleration: Enable for faster processing
-3. Click "Generate Point Cloud PLY from Selected"
-
-NOTE: Point cloud export is currently accurate, but super slow. Improvement planned.
+3. Click "Generate Point Cloud"
+4. pointcloud.ply is saved to your output folder
 ```
 
-### Batch Operations
-Use "Generate & Export" button to generate camera keyframes and export JSON data in one operation.
+### 6. Render Animation
+```
+1. Choose render engine (Cycles/EEVEE)
+2. For Cycles: select device and persistent data options
+3. Click "Render Animation"
+4. Frames are rendered to the images/ subfolder
+```
 
 # Technical Details
 
@@ -178,11 +182,12 @@ Use "Generate & Export" button to generate camera keyframes and export JSON data
 ## Performance Optimization
 - Use low-poly meshes as helpers for faster processing. Icospheres work great.
 - Enable GPU acceleration for point cloud generation
-- Start with low resolution (8-16)
-- Use "persistent render data" setting for rendering speed-up
+- Start with low ray density (8-16)
+- Use stride to skip frames during point cloud generation
+- Enable "Persistent Data" in the render animation step for faster Cycles rendering
 
 ## Quality Considerations
-- Higher point cloud resolution = better quality but slower
+- Higher ray density = better quality but slower
 - Helper face count - invalid cameras = camera count
 - Interior detection may slow generation on complex scenes
 - Helper meshes should encompass the target object
