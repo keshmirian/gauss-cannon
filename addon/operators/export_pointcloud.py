@@ -61,6 +61,8 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         orig_res_y = scene.render.resolution_y
         orig_percentage = scene.render.resolution_percentage
         orig_filepath = scene.render.filepath
+        orig_file_format = scene.render.image_settings.file_format
+        orig_color_mode = scene.render.image_settings.color_mode
 
         # Temporarily hide helper meshes from viewport
         helper_meshes = []
@@ -73,10 +75,12 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         for obj, _ in helper_meshes:
             obj.hide_viewport = True
 
-        # Set low resolution
+        # Set low resolution and force PNG output
         scene.render.resolution_x = resolution
         scene.render.resolution_y = resolution
         scene.render.resolution_percentage = 100
+        scene.render.image_settings.file_format = 'PNG'
+        scene.render.image_settings.color_mode = 'RGBA'
 
         # Render to temporary image
         temp_path = os.path.join(
@@ -108,6 +112,8 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             scene.render.resolution_y = orig_res_y
             scene.render.resolution_percentage = orig_percentage
             scene.render.filepath = orig_filepath
+            scene.render.image_settings.file_format = orig_file_format
+            scene.render.image_settings.color_mode = orig_color_mode
 
             # Restore helper mesh visibility
             for obj, orig_hide in helper_meshes:
