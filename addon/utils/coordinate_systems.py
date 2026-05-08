@@ -20,12 +20,15 @@ def convert_coordinate_system(coordinate_system, transform_matrix=None, point=No
         # LichtFeld: X-right, Y-up, Z-forward
 
         if transform_matrix is not None:
-            # For cameras: base conversion + 180-degree Y rotation in world space
-            # Combined transformation: rotation_y_180 @ base_conversion
+            # For cameras: base conversion + 180-degree Z rotation in world space
+            # Combined transformation: rotation_z_180 @ base_conversion
+            # (equivalent to rotation_x_180 @ rotation_y_180 @ base_conversion;
+            # the X-180 component aligns cameras with LichtFeld's updated
+            # coordinate convention, which previously required only Y-180.)
             camera_conversion = Matrix([
                 [-1,  0,  0, 0],
-                [ 0,  0, -1, 0],
-                [ 0, -1,  0, 0],
+                [ 0,  0,  1, 0],
+                [ 0,  1,  0, 0],
                 [ 0,  0,  0, 1]
             ])
             return camera_conversion @ transform_matrix
