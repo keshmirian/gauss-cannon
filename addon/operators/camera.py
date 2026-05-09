@@ -1,7 +1,11 @@
 import bpy
 import os
 from mathutils import Vector, Matrix
-from ..utils.ray_casting import is_camera_inside_mesh
+from ..utils.ray_casting import (
+    is_camera_inside_mesh,
+    is_geometry_within_near_clip,
+    build_visible_mesh_bvh_cache,
+)
 
 
 class CAMERA_OT_generate_from_faces(bpy.types.Operator):
@@ -44,6 +48,19 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
                     helper_objects.add(item.mesh_object)
             except (AttributeError, ReferenceError):
                 pass
+
+        # Build the per-export BVH cache and capture frame-shared values once,
+        # so the per-face clip check doesn't re-gather meshes or rebuild BVHs.
+        if scene.skip_interior_cameras:
+            mesh_bvh_cache = build_visible_mesh_bvh_cache(context, helper_objects)
+            clip_aspect = (
+                scene.render.resolution_x / scene.render.resolution_y
+                if scene.render.resolution_y
+                else 1.0
+            )
+        else:
+            mesh_bvh_cache = []
+            clip_aspect = 1.0
 
         # Process each helper mesh
         for helper_item in scene.helper_meshes:
@@ -104,19 +121,20 @@ class CAMERA_OT_generate_from_faces(bpy.types.Operator):
                         rejected_cameras += 1
                         continue  # Skip this camera position
 
-                    # Check if any object is too close (within near clipping plane)
-                    near_clip = camera.data.clip_start
-                    depsgraph = context.evaluated_depsgraph_get()
-                    # Cast ray from camera position in viewing direction
-                    result, location, normal, index, object, matrix = scene.ray_cast(
-                        depsgraph, face_center, look_dir
-                    )
-                    if result:
-                        # Calculate distance to hit point
-                        distance = (location - face_center).length
-                        if distance < near_clip:
-                            rejected_cameras += 1
-                            continue  # Skip this camera position
+                    # Check if any geometry intersects the near clipping plane
+                    # using a BVH overlap of the camera-to-near-plane volume
+                    # against the cached per-mesh BVHs.
+                    if is_geometry_within_near_clip(
+                        camera.data,
+                        face_center,
+                        look_dir,
+                        right,
+                        up,
+                        mesh_bvh_cache,
+                        clip_aspect,
+                    ):
+                        rejected_cameras += 1
+                        continue  # Skip this camera position
 
                 # Set camera location and rotation
                 camera.location = face_center
