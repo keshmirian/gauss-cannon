@@ -2,7 +2,7 @@ import bpy
 import os
 import json
 import numpy as np
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector, Euler
 from ..utils.coordinate_systems import convert_coordinate_system
 
 
@@ -51,7 +51,109 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
 
         return float(np.max(bbox_size))
 
-    def extract_camera_parameters(self, camera_obj, render_settings, coordinate_system, export_mode=None):
+    def iter_action_fcurves(self, animation_data):
+        """
+        Yield F-curves from animation_data, working across Blender versions.
+
+        Pre-4.4: F-curves live directly on Action.fcurves.
+        4.4+ (Slotted Actions): F-curves live in Channelbags inside Strips
+        inside Layers, keyed by the animation_data's action_slot.
+        """
+        if not animation_data or not animation_data.action:
+            return
+        action = animation_data.action
+
+        legacy = getattr(action, "fcurves", None)
+        if legacy is not None:
+            for fc in legacy:
+                yield fc
+            return
+
+        slot = getattr(animation_data, "action_slot", None)
+        for layer in getattr(action, "layers", []):
+            for strip in getattr(layer, "strips", []):
+                cb = None
+                if slot is not None and hasattr(strip, "channelbag"):
+                    try:
+                        cb = strip.channelbag(slot)
+                    except Exception:
+                        cb = None
+                if cb is None:
+                    # No slot match — fall back to any channelbags on the strip
+                    for cb_alt in getattr(strip, "channelbags", []):
+                        for fc in cb_alt.fcurves:
+                            yield fc
+                    continue
+                for fc in cb.fcurves:
+                    yield fc
+
+    def build_fast_path_evaluator(self, camera):
+        """
+        Build a frame -> world-matrix evaluator that bypasses scene.frame_set.
+
+        Reads keyframe values directly from the camera's location/rotation_euler
+        F-curves so we don't trigger a full depsgraph evaluation for every frame
+        (which is slow when the scene has rigged characters, simulations, etc.).
+
+        Returns a callable on success, or None when the camera transform can't
+        be reconstructed in isolation — caller should then fall back to
+        scene.frame_set + camera.matrix_world.
+        """
+        # Anything that makes matrix_world depend on more than the camera's own
+        # local transform forces the slow path.
+        if camera.parent is not None:
+            return None
+        if len(camera.constraints) > 0:
+            return None
+        if camera.rotation_mode != "XYZ":
+            return None
+        cam_anim = camera.data.animation_data
+        if cam_anim and any(True for _ in self.iter_action_fcurves(cam_anim)):
+            # Animated intrinsics (lens, sensor, clip): we'd need depsgraph eval
+            return None
+        if not camera.animation_data or not camera.animation_data.action:
+            return None
+
+        needed = {
+            ("location", 0): None,
+            ("location", 1): None,
+            ("location", 2): None,
+            ("rotation_euler", 0): None,
+            ("rotation_euler", 1): None,
+            ("rotation_euler", 2): None,
+        }
+        for fc in self.iter_action_fcurves(camera.animation_data):
+            key = (fc.data_path, fc.array_index)
+            if key in needed:
+                needed[key] = fc
+        if any(fc is None for fc in needed.values()):
+            return None
+
+        def to_dict(fc):
+            return {int(round(kp.co.x)): kp.co.y for kp in fc.keyframe_points}
+
+        loc_maps = [to_dict(needed[("location", i)]) for i in range(3)]
+        rot_maps = [to_dict(needed[("rotation_euler", i)]) for i in range(3)]
+
+        scale_mat = Matrix.Diagonal(camera.scale).to_4x4()
+
+        def evaluate(frame_idx):
+            try:
+                loc = Vector(
+                    (loc_maps[0][frame_idx], loc_maps[1][frame_idx], loc_maps[2][frame_idx])
+                )
+                rot = Euler(
+                    (rot_maps[0][frame_idx], rot_maps[1][frame_idx], rot_maps[2][frame_idx]),
+                    "XYZ",
+                )
+            except KeyError:
+                # Frame missing from keyframes for any channel; let caller fall back.
+                return None
+            return Matrix.Translation(loc) @ rot.to_matrix().to_4x4() @ scale_mat
+
+        return evaluate
+
+    def extract_camera_parameters(self, camera_obj, render_settings, coordinate_system, export_mode=None, world_matrix=None):
         """Extract camera parameters with optimizations"""
         cam_data = camera_obj.data
 
@@ -93,8 +195,10 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             fov_x = 2.0 * np.arctan(sensor_w / (2.0 * focal_mm))
             fov_y = 2.0 * np.arctan(sensor_h / (2.0 * focal_mm))
 
-        # Get transform matrix
-        transform_matrix = camera_obj.matrix_world.copy()
+        # Get transform matrix (fast-path override avoids depsgraph eval)
+        transform_matrix = (
+            world_matrix if world_matrix is not None else camera_obj.matrix_world
+        ).copy()
 
         # Apply coordinate system conversion if needed
         transform_matrix = convert_coordinate_system(coordinate_system, transform_matrix=transform_matrix)
@@ -158,9 +262,22 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         # Calculate scene bounds
         scene_scale = self.compute_scene_bounds()
 
+        # Try to build a fast-path evaluator that reads camera transforms directly
+        # from F-curve keyframe data, bypassing per-frame depsgraph evaluation.
+        fast_eval = self.build_fast_path_evaluator(camera)
+        slow_path_frames = 0
+
         # Get initial camera parameters
-        scene.frame_set(scene.frame_start)
-        initial_params = self.extract_camera_parameters(camera, scene.render, scene.coordinate_system, scene.export_mode)
+        initial_matrix = fast_eval(scene.frame_start) if fast_eval is not None else None
+        if initial_matrix is None:
+            scene.frame_set(scene.frame_start)
+        initial_params = self.extract_camera_parameters(
+            camera,
+            scene.render,
+            scene.coordinate_system,
+            scene.export_mode,
+            world_matrix=initial_matrix,
+        )
 
         # Build output structure based on export mode
         if scene.export_mode == "POSTSHOT":
@@ -199,10 +316,19 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         # Process all frames
         frame_count = scene.frame_end - scene.frame_start + 1
         for frame_idx in range(scene.frame_start, scene.frame_end + 1):
-            scene.frame_set(frame_idx)
+            world_matrix = fast_eval(frame_idx) if fast_eval is not None else None
+            if world_matrix is None:
+                scene.frame_set(frame_idx)
+                slow_path_frames += 1
 
             # Extract camera parameters for this frame
-            frame_params = self.extract_camera_parameters(camera, scene.render, scene.coordinate_system, scene.export_mode)
+            frame_params = self.extract_camera_parameters(
+                camera,
+                scene.render,
+                scene.coordinate_system,
+                scene.export_mode,
+                world_matrix=world_matrix,
+            )
 
             # Generate frame data
             simplified_mode = scene.export_mode in ["POSTSHOT", "LICHTFELD"]
@@ -221,5 +347,15 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         with open(output_path, "w") as f:
             json.dump(output_json, f, indent=2)
 
-        self.report({"INFO"}, f"Exported {frame_count} frames to {output_path}")
+        if fast_eval is not None and slow_path_frames == 0:
+            path_msg = " (fast path: no depsgraph eval)"
+        elif fast_eval is not None:
+            path_msg = f" ({slow_path_frames}/{frame_count} frames used slow path)"
+        else:
+            path_msg = " (slow path: camera has parent/constraints/animated intrinsics)"
+
+        self.report(
+            {"INFO"},
+            f"Exported {frame_count} frames to {output_path}{path_msg}",
+        )
         return {"FINISHED"}
