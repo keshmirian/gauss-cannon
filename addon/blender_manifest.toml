@@ -3,12 +3,12 @@ id = "gauss_cannon"
 version = "1.1.4"
 name = "Gauss Cannon"
 tagline = "Camera paths and point clouds for Gaussian Splatting workflows"
-maintainer = "Arash Keshmirian <arash.keshmirian@gmail.com>"
+maintainer = "Warpgate Labs <contact@warp-gate.com>"
 # Supported types: "add-on", "theme"
 type = "add-on"
 
 # Optional link to documentation, support, source files, etc
-# website = "https://extensions.blender.org/add-ons/my-example-package/"
+website = "https://github.com/warpgatelabs/gauss-cannon"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
