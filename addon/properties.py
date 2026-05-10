@@ -56,6 +56,7 @@ def register_properties():
         items=[
             ("LICHTFELD", "LichtFeld Studio", "Compatible with LichtFeld Studio"),
             ("POSTSHOT", "Postshot", "Compatible with Postshot"),
+            ("BRUSH", "Brush", "Compatible with Brush"),
         ],
         default="LICHTFELD",
     )

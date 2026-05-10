@@ -67,7 +67,8 @@ class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):
         col = box.column(align=True)
         col.prop(scene, "output_folder")
         col.prop(scene, "export_mode")
-        col.prop(scene, "coordinate_system")
+        if scene.export_mode != "BRUSH":
+            col.prop(scene, "coordinate_system")
 
         if not scene.output_folder.strip():
             layout.label(text="Set an output folder to continue", icon="INFO")

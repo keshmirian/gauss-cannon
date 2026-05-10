@@ -277,9 +277,10 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             os.makedirs(output_dir)
         output_path = os.path.join(output_dir, "pointcloud.ply")
 
-        self.write_ply(output_path, self._all_points, self._all_colors, scene.coordinate_system)
+        coordinate_system = "Z_UP" if scene.export_mode == "BRUSH" else scene.coordinate_system
+        self.write_ply(output_path, self._all_points, self._all_colors, coordinate_system)
 
-        coord_info = "Y-up" if scene.coordinate_system == "Y_UP" else "Z-up"
+        coord_info = "Y-up" if coordinate_system == "Y_UP" else "Z-up"
         self.report(
             {"INFO"},
             f"Generated {len(self._all_points)} points from {self._total_frames} frames ({coord_info})",

@@ -165,7 +165,7 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         render_h = render_settings.resolution_y
 
         # Field of view calculation and focal lengths
-        if export_mode == "LICHTFELD":
+        if export_mode in ("LICHTFELD", "BRUSH"):
             # For LichtFeld Studio, use Blender's actual FOV directly
             # Blender's cam_data.angle is the FOV in radians
             if cam_data.sensor_fit == 'HORIZONTAL' or (cam_data.sensor_fit == 'AUTO' and render_w >= render_h):
@@ -262,6 +262,9 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         # Calculate scene bounds
         scene_scale = self.compute_scene_bounds()
 
+        # Brush uses LichtFeld's JSON layout but Z-up coordinates
+        coordinate_system = "Z_UP" if scene.export_mode == "BRUSH" else scene.coordinate_system
+
         # Try to build a fast-path evaluator that reads camera transforms directly
         # from F-curve keyframe data, bypassing per-frame depsgraph evaluation.
         fast_eval = self.build_fast_path_evaluator(camera)
@@ -274,7 +277,7 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
         initial_params = self.extract_camera_parameters(
             camera,
             scene.render,
-            scene.coordinate_system,
+            coordinate_system,
             scene.export_mode,
             world_matrix=initial_matrix,
         )
@@ -292,8 +295,8 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
                 "cy": scene.render.resolution_y / 2.0,
                 "frames": [],
             }
-        elif scene.export_mode == "LICHTFELD":
-            # LichtFeld Studio mode: include full camera data at top level
+        elif scene.export_mode in ("LICHTFELD", "BRUSH"):
+            # LichtFeld Studio / Brush mode: include full camera data at top level
             output_json = {
                 "aabb_scale": scene_scale,
                 "w": scene.render.resolution_x,
@@ -325,13 +328,13 @@ class EXPORT_OT_camera_json(bpy.types.Operator):
             frame_params = self.extract_camera_parameters(
                 camera,
                 scene.render,
-                scene.coordinate_system,
+                coordinate_system,
                 scene.export_mode,
                 world_matrix=world_matrix,
             )
 
             # Generate frame data
-            simplified_mode = scene.export_mode in ["POSTSHOT", "LICHTFELD"]
+            simplified_mode = scene.export_mode in ["POSTSHOT", "LICHTFELD", "BRUSH"]
             frame_data = self.generate_frame_data(
                 frame_idx, frame_params, simplified=simplified_mode
             )
