@@ -57,9 +57,12 @@ Created/Maintained by [Arash Keshmirian](https://github.com/keshmirian)
 # Installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/keshmirian/gauss-cannon/releases)
-2. In Blender, go to `Edit > Preferences > Add-ons`
-3. Click `Install...` and select the downloaded `.zip` file
-4. Enable the add-on by checking the box next to "Gauss Cannon"
+2. In Blender, go to `Edit > Preferences > Get Extensions`
+3. Click the dropdown menu in the top-right of the panel and choose `Install from Disk...`
+4. Select the downloaded `.zip` file
+5. Enable the add-on by checking the box next to "Gauss Cannon"
+
+To uninstall or update later, find Gauss Cannon under `Edit > Preferences > Get Extensions` (or the Add-ons tab) and use the dropdown arrow next to the entry.
 
 # Usage
 
