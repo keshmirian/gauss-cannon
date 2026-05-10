@@ -27,7 +27,8 @@ jobs:
 
     - name: Update manifest version
       run: |
-        sed -i 's/version = ".*"/version = "${{ steps.version.outputs.VERSION }}"/' addon/blender_manifest.toml
+        # Anchor the regex so we only replace the `version` line, not `schema_version`.
+        sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.VERSION }}"/' addon/blender_manifest.toml
 
     - name: Create addon zip
       run: |
