@@ -339,7 +339,7 @@ def build_scene_bvh(selected_meshes):
         BVHTree or None: combined world-space BVH, or None if no geometry
     """
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    all_verts = []
+    vert_arrays = []
     all_polys = []
     offset = 0
 
@@ -351,15 +351,27 @@ def build_scene_bvh(selected_meshes):
         if mesh is None:
             continue
         try:
-            mw = obj.matrix_world
-            all_verts.extend(mw @ v.co for v in mesh.vertices)
+            # Transform the temporary evaluated mesh into world space in C,
+            # then bulk-read coords via foreach_get. At 100M-vert scale this
+            # avoids constructing a Python Vector and doing a Python-side
+            # matrix multiply per vertex — the dominant cost of the build.
+            mesh.transform(obj.matrix_world)
+            n_verts = len(mesh.vertices)
+            flat = np.empty(n_verts * 3, dtype=np.float32)
+            mesh.vertices.foreach_get("co", flat)
+            vert_arrays.append(flat.reshape(-1, 3))
+
+            # Polygon connectivity stays in Python for mixed-topology
+            # compatibility (n-gons can't be foreach_get'd as fixed-stride
+            # arrays). The vertex transform was the hot path.
             all_polys.extend([i + offset for i in p.vertices] for p in mesh.polygons)
-            offset += len(mesh.vertices)
+            offset += n_verts
         finally:
             obj_eval.to_mesh_clear()
 
-    if not all_verts or not all_polys:
+    if not vert_arrays or not all_polys:
         return None
+    all_verts = np.vstack(vert_arrays)
     return BVHTree.FromPolygons(all_verts, all_polys)
 
 
