@@ -59,24 +59,41 @@ end_header
 """
 
 
-def write_ply_point(point, color, coordinate_system):
+def write_ply_bulk(filepath, points, colors, coordinate_system):
     """
-    Write a single point and color to PLY format in binary.
+    Write an entire colored point cloud to PLY in a single bulk operation.
+
+    ``points`` and ``colors`` are numpy arrays of shape ``(N, 3)``. Coordinate
+    conversion and color quantization are vectorized; the binary body is laid
+    out into a structured array (12-byte position + 3-byte RGB per record,
+    matching the PLY spec exactly) and written with one ``tofile`` call —
+    significantly faster than per-point writes for large clouds.
 
     Args:
-        point: 3D point coordinates
-        color: RGB color values (0-1 range)
+        filepath: Output .ply path
+        points: (N, 3) numpy array of XYZ in Blender's Z-up world space
+        colors: (N, 3) numpy array of RGB in 0..1 range
         coordinate_system: "Y_UP" or "Z_UP"
-
-    Returns:
-        bytes: Binary data for this point
     """
-    converted_point = convert_coordinate_system(coordinate_system, point=point)
+    num_points = points.shape[0]
+    header = write_ply_header(num_points).encode("ascii")
 
-    # Position (3 floats)
-    position_data = np.array(converted_point, dtype=np.float32).tobytes()
+    if coordinate_system == "Y_UP":
+        # Match convert_coordinate_system(point=...): [x, z, -y]
+        out_points = np.empty_like(points, dtype=np.float32)
+        out_points[:, 0] = points[:, 0]
+        out_points[:, 1] = points[:, 2]
+        out_points[:, 2] = -points[:, 1]
+    else:
+        out_points = points.astype(np.float32, copy=False)
 
-    # Color (3 unsigned chars)
-    color_data = np.array(color * 255, dtype=np.uint8).tobytes()
+    rgb = np.clip(colors * 255.0, 0.0, 255.0).astype(np.uint8)
 
-    return position_data + color_data
+    record_dtype = np.dtype([("pos", "<f4", 3), ("rgb", "u1", 3)])
+    records = np.empty(num_points, dtype=record_dtype)
+    records["pos"] = out_points
+    records["rgb"] = rgb
+
+    with open(filepath, "wb") as f:
+        f.write(header)
+        records.tofile(f)
