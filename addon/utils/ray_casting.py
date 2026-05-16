@@ -474,8 +474,9 @@ def cast_scene_rays(
     written = 0
     for ray_idx in hit_pixels:
         if cam_type == "PERSP":
+            # Rotation preserves length and cam_dirs are pre-normalized, so
+            # no per-ray normalize is needed.
             ray_dir = cam_rot @ cam_dirs[ray_idx]
-            ray_dir.normalize()
             ray_origin = cam_origin
         else:
             off_x, off_y = cam_offsets[ray_idx]
@@ -487,9 +488,7 @@ def cast_scene_rays(
             continue
 
         slot = write_offset + written
-        points_buf[slot, 0] = location.x
-        points_buf[slot, 1] = location.y
-        points_buf[slot, 2] = location.z
+        points_buf[slot] = location
         colors_buf[slot] = colors_flat[ray_idx]
         written += 1
 

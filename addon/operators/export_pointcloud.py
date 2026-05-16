@@ -2,7 +2,6 @@ import bpy
 import os
 import time
 import numpy as np
-import gpu
 from ..utils.ray_casting import (
     build_scene_bvh,
     cast_ray_through_pixel,
@@ -52,16 +51,6 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             and context.scene.output_folder.strip()
             and not cls._is_running
         )
-
-    def check_gpu_available(self):
-        """Check if GPU acceleration is available."""
-        try:
-            test_data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-            buffer = gpu.types.Buffer("FLOAT", 3, test_data)
-            del buffer
-            return True
-        except Exception:
-            return False
 
     def render_frame_to_pixels(self, context, resolution):
         """Render current frame and return pixel data"""
@@ -161,7 +150,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         self._frame_idx = self._frame_start
         self._stride = scene.pointcloud_stride
         self._total_frames = len(range(self._frame_start, self._frame_end + 1, self._stride))
-        self._use_gpu = scene.use_gpu_acceleration and self.check_gpu_available()
+        self._use_gpu = scene.use_gpu_acceleration
         self._orig_frame = scene.frame_current
 
         # Hoist camera attrs that don't change between frames out of the
@@ -290,9 +279,7 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
                     )
                     if hit_point:
                         slot = self._point_count
-                        self._points_buf[slot, 0] = hit_point.x
-                        self._points_buf[slot, 1] = hit_point.y
-                        self._points_buf[slot, 2] = hit_point.z
+                        self._points_buf[slot] = hit_point
                         self._colors_buf[slot] = pixels_flipped[y_flat, x, :3]
                         self._point_count += 1
 
