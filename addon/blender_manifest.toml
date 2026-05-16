@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "gauss_cannon"
-version = "1.1.4"
+version = "1.2.0"
 name = "Gauss Cannon"
 tagline = "Camera paths and point clouds for Gaussian Splatting workflows"
 maintainer = "Warpgate Labs <contact@warp-gate.com>"
