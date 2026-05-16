@@ -1,7 +1,7 @@
 import bpy
 
 
-VERSION = "1.1.4"
+VERSION = "1.2.0"
 
 
 class VIEW3D_PT_helper_mesh_panel(bpy.types.Panel):

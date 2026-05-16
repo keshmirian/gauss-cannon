@@ -2,9 +2,13 @@ import bpy
 import os
 import time
 import numpy as np
-import gpu
-from ..utils.ray_casting import cast_ray_through_pixel, gpu_accelerated_ray_cast
-from ..utils.coordinate_systems import write_ply_header, write_ply_point
+from ..utils.ray_casting import (
+    build_scene_bvh,
+    cast_ray_through_pixel,
+    cast_scene_rays,
+    precompute_camera_rays,
+)
+from ..utils.coordinate_systems import write_ply_bulk
 
 
 class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
@@ -20,9 +24,15 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
     _frame_start = 0
     _frame_end = 0
     _total_frames = 0
-    _all_points = []
-    _all_colors = []
     _selected_meshes = []
+    _scene_bvh = None
+    _cam_dirs = None
+    _cam_offsets = None
+    _cam_type = "PERSP"
+    _near_clip = 0.0
+    _points_buf = None
+    _colors_buf = None
+    _point_count = 0
     _use_gpu = False
     _resolution = 8
     _orig_persistent_data = False
@@ -41,16 +51,6 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             and context.scene.output_folder.strip()
             and not cls._is_running
         )
-
-    def check_gpu_available(self):
-        """Check if GPU acceleration is available."""
-        try:
-            test_data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-            buffer = gpu.types.Buffer("FLOAT", 3, test_data)
-            del buffer
-            return True
-        except Exception:
-            return False
 
     def render_frame_to_pixels(self, context, resolution):
         """Render current frame and return pixel data"""
@@ -119,20 +119,6 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             for obj, orig_hide in helper_meshes:
                 obj.hide_viewport = orig_hide
 
-    def write_ply(self, filepath, points, colors, coordinate_system):
-        """Write point cloud to PLY file"""
-        num_points = len(points)
-
-        with open(filepath, "wb") as f:
-            # Write PLY header
-            header = write_ply_header(num_points)
-            f.write(header.encode("ascii"))
-
-            # Write binary data
-            for i in range(num_points):
-                point_data = write_ply_point(points[i], colors[i], coordinate_system)
-                f.write(point_data)
-
     def execute(self, context):
         scene = context.scene
         self._resolution = scene.pointcloud_resolution
@@ -164,10 +150,36 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         self._frame_idx = self._frame_start
         self._stride = scene.pointcloud_stride
         self._total_frames = len(range(self._frame_start, self._frame_end + 1, self._stride))
-        self._all_points = []
-        self._all_colors = []
-        self._use_gpu = scene.use_gpu_acceleration and self.check_gpu_available()
+        self._use_gpu = scene.use_gpu_acceleration
         self._orig_frame = scene.frame_current
+
+        # Hoist camera attrs that don't change between frames out of the
+        # per-pixel hot path.
+        cam_data = scene.camera.data
+        self._cam_type = cam_data.type
+        self._near_clip = cam_data.clip_start
+
+        # Static-scene precomputes: a single world-space BVH spanning every
+        # selected mesh, and per-pixel cam-space ray data. Both depend only
+        # on geometry + camera intrinsics + resolution, none of which change
+        # across the frame range, so they're built exactly once.
+        if self._use_gpu:
+            self._scene_bvh = build_scene_bvh(self._selected_meshes)
+            self._cam_dirs, self._cam_offsets = precompute_camera_rays(
+                cam_data, self._resolution
+            )
+        else:
+            self._scene_bvh = None
+            self._cam_dirs = None
+            self._cam_offsets = None
+
+        # Preallocate output buffers sized to the absolute upper bound
+        # (every pixel of every frame hits geometry). _point_count tracks
+        # the live size so finish() can slice down to actual hits.
+        max_points = self._total_frames * self._resolution * self._resolution
+        self._points_buf = np.empty((max_points, 3), dtype=np.float32)
+        self._colors_buf = np.empty((max_points, 3), dtype=np.float32)
+        self._point_count = 0
 
         # Store original persistent data setting
         self._orig_persistent_data = scene.render.use_persistent_data
@@ -229,32 +241,60 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
             pixels = self.render_frame_to_pixels(context, self._resolution)
 
             if self._use_gpu:
-                frame_results = gpu_accelerated_ray_cast(
-                    scene, scene.camera, self._resolution, self._selected_meshes, pixels
+                written = cast_scene_rays(
+                    self._scene_bvh,
+                    scene.camera.matrix_world,
+                    pixels,
+                    self._cam_dirs,
+                    self._cam_offsets,
+                    self._resolution,
+                    self._near_clip,
+                    self._cam_type,
+                    self._points_buf,
+                    self._colors_buf,
+                    self._point_count,
                 )
-                for hit_point, color in frame_results:
-                    self._all_points.append(hit_point)
-                    self._all_colors.append(color)
+                self._point_count += written
             else:
-                for y in range(self._resolution):
-                    for x in range(self._resolution):
-                        color = pixels[self._resolution - 1 - y, x, :3]
-                        hit_point = cast_ray_through_pixel(
-                            scene,
-                            scene.camera,
-                            x + 0.5,
-                            y + 0.5,
-                            self._resolution,
-                            self._resolution,
-                            self._selected_meshes,
-                        )
-                        if hit_point:
-                            self._all_points.append(hit_point)
-                            self._all_colors.append(color)
+                # CPU fallback: legacy per-mesh path. Still benefits from the
+                # alpha skip and preallocated buffers, but ray casting goes
+                # through Blender's per-mesh BVH cache rather than our merged
+                # scene BVH.
+                R = self._resolution
+                # Blender stores image pixels bottom-up, so flip rows once
+                # to align with the (y, x) ordering cast_ray_through_pixel
+                # expects (y=0 is the top of the camera frustum).
+                pixels_flipped = pixels[::-1, :, :]
+                hit_mask = pixels_flipped[:, :, 3] > 0.0
+                for ray_idx in np.argwhere(hit_mask):
+                    y_flat, x = int(ray_idx[0]), int(ray_idx[1])
+                    hit_point = cast_ray_through_pixel(
+                        scene,
+                        scene.camera,
+                        x + 0.5,
+                        y_flat + 0.5,
+                        R,
+                        R,
+                        self._selected_meshes,
+                    )
+                    if hit_point:
+                        slot = self._point_count
+                        self._points_buf[slot] = hit_point
+                        self._colors_buf[slot] = pixels_flipped[y_flat, x, :3]
+                        self._point_count += 1
 
             self._frame_idx += self._stride
 
         return {"RUNNING_MODAL"}
+
+    def _release_state(self):
+        """Drop references to large per-run state so memory isn't pinned
+        after the operator exits."""
+        self._scene_bvh = None
+        self._cam_dirs = None
+        self._cam_offsets = None
+        self._points_buf = None
+        self._colors_buf = None
 
     def finish(self, context):
         """Complete the operation and write output file"""
@@ -278,14 +318,17 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         output_path = os.path.join(output_dir, "pointcloud.ply")
 
         coordinate_system = "Z_UP" if scene.export_mode == "BRUSH" else scene.coordinate_system
-        self.write_ply(output_path, self._all_points, self._all_colors, coordinate_system)
+        points = self._points_buf[: self._point_count]
+        colors = self._colors_buf[: self._point_count]
+        write_ply_bulk(output_path, points, colors, coordinate_system)
 
         coord_info = "Y-up" if coordinate_system == "Y_UP" else "Z-up"
         self.report(
             {"INFO"},
-            f"Generated {len(self._all_points)} points from {self._total_frames} frames ({coord_info})",
+            f"Generated {self._point_count} points from {self._total_frames} frames ({coord_info})",
         )
 
+        self._release_state()
         return {"FINISHED"}
 
     def cancel(self, context):
@@ -302,3 +345,4 @@ class EXPORT_OT_pointcloud_ply(bpy.types.Operator):
         scene.frame_set(self._orig_frame)
         context.area.header_text_set(None)
         EXPORT_OT_pointcloud_ply._is_running = False
+        self._release_state()

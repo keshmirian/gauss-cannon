@@ -322,98 +322,186 @@ def cast_ray_through_pixel(scene, camera, pixel_x, pixel_y, res_x, res_y, select
     return None
 
 
-def gpu_accelerated_ray_cast(scene, camera, resolution, selected_meshes, pixels):
+def build_scene_bvh(selected_meshes):
     """
-    GPU-accelerated ray casting using Blender's BVH trees.
+    Build a single world-space BVHTree containing every triangle from every
+    selected mesh. The static-scene assumption is load-bearing: vertices are
+    baked into world space at build time, so the tree is reusable across all
+    frames as long as no object moves and no geometry deforms.
+
+    Collapsing N per-mesh trees into one cuts per-ray cost from O(meshes) to
+    O(1) ray_cast calls — the main win for scenes with thousands of objects.
 
     Args:
-        scene: Blender scene
-        camera: Camera object
-        resolution: Square resolution for casting
-        selected_meshes: List of mesh objects to intersect
-        pixels: Rendered pixel data
+        selected_meshes: List of mesh objects to merge into the BVH
 
     Returns:
-        list: List of (hit_point, color) tuples
+        BVHTree or None: combined world-space BVH, or None if no geometry
     """
-    cam_matrix = camera.matrix_world
-    cam_data = camera.data
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    vert_arrays = []
+    all_polys = []
+    offset = 0
 
-    # Build BVH trees for all selected meshes
-    bvh_trees = []
     for obj in selected_meshes:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
+        if obj.type != "MESH":
+            continue
         obj_eval = obj.evaluated_get(depsgraph)
         mesh = obj_eval.to_mesh()
+        if mesh is None:
+            continue
+        try:
+            # Transform the temporary evaluated mesh into world space in C,
+            # then bulk-read coords via foreach_get. At 100M-vert scale this
+            # avoids constructing a Python Vector and doing a Python-side
+            # matrix multiply per vertex — the dominant cost of the build.
+            mesh.transform(obj.matrix_world)
+            n_verts = len(mesh.vertices)
+            flat = np.empty(n_verts * 3, dtype=np.float32)
+            mesh.vertices.foreach_get("co", flat)
+            vert_arrays.append(flat.reshape(-1, 3))
 
-        # Create BVH tree
-        bvh = BVHTree.FromPolygons(
-            [v.co for v in mesh.vertices], [p.vertices for p in mesh.polygons]
-        )
-        bvh_trees.append((bvh, obj.matrix_world))
-        obj_eval.to_mesh_clear()
+            # Polygon connectivity stays in Python for mixed-topology
+            # compatibility (n-gons can't be foreach_get'd as fixed-stride
+            # arrays). The vertex transform was the hot path.
+            all_polys.extend([i + offset for i in p.vertices] for p in mesh.polygons)
+            offset += n_verts
+        finally:
+            obj_eval.to_mesh_clear()
 
-    results = []
+    if not vert_arrays or not all_polys:
+        return None
+    all_verts = np.vstack(vert_arrays)
+    return BVHTree.FromPolygons(all_verts, all_polys)
 
-    # Process rays in batches for better performance
-    for y in range(resolution):
-        for x in range(resolution):
-            # Calculate ray
-            ndc_x = (2.0 * (x + 0.5) / resolution) - 1.0
-            ndc_y = 1.0 - (2.0 * (y + 0.5) / resolution)
 
-            aspect = 1.0  # Square aspect ratio
-            if cam_data.type == "PERSP":
-                fov = cam_data.angle
-                tan_half_fov = math.tan(fov / 2.0)
-                ray_dir_cam = Vector(
-                    (ndc_x * tan_half_fov * aspect, ndc_y * tan_half_fov, -1.0)
-                ).normalized()
-            else:
-                ortho_scale = cam_data.ortho_scale
-                ray_dir_cam = Vector((0, 0, -1))
-                offset_x = ndc_x * ortho_scale * aspect / 2.0
-                offset_y = ndc_y * ortho_scale / 2.0
+def precompute_camera_rays(cam_data, resolution):
+    """
+    Precompute per-pixel ray data in camera space for a fixed resolution.
 
-            # Transform to world space
-            ray_origin = cam_matrix.translation.copy()
-            ray_dir_world = cam_matrix.to_3x3() @ ray_dir_cam
-            ray_dir_world.normalize()
+    Camera intrinsics and resolution don't change between frames, so this
+    work can be lifted out of the per-frame loop. Only the camera's world
+    matrix is applied per frame.
 
-            if cam_data.type == "ORTHO":
-                right = cam_matrix.to_3x3() @ Vector((1, 0, 0))
-                up = cam_matrix.to_3x3() @ Vector((0, 1, 0))
-                ray_origin += right * offset_x + up * offset_y
+    Pixel ordering matches the existing flipped-row convention: ray index
+    ``y * R + x`` corresponds to image pixel ``pixels[R - 1 - y, x]``.
 
-            # Find closest hit using BVH
-            closest_hit = None
-            closest_dist = float("inf")
+    Args:
+        cam_data: Camera data block
+        resolution: Square render resolution
 
-            for bvh, obj_matrix in bvh_trees:
-                # Transform ray to object space
-                obj_inv = obj_matrix.inverted()
-                ray_origin_obj = obj_inv @ ray_origin
-                ray_dir_obj = obj_inv.to_3x3() @ ray_dir_world
-                ray_dir_obj.normalize()
+    Returns:
+        (cam_dirs, cam_offsets):
+          - cam_dirs: list of length R*R of normalized Vectors in cam space.
+            For PERSP these vary per pixel; for ORTHO they're all (0, 0, -1).
+          - cam_offsets: list of length R*R of (off_right, off_up) tuples for
+            ORTHO, or None for PERSP.
+    """
+    R = resolution
+    aspect = 1.0  # square render
 
-                # Cast ray using BVH
-                location, normal, index, dist = bvh.ray_cast(
-                    ray_origin_obj, ray_dir_obj
-                )
+    if cam_data.type == "PERSP":
+        tan_half = math.tan(cam_data.angle / 2.0)
+        cam_dirs = []
+        for y in range(R):
+            ndc_y = 1.0 - (2.0 * (y + 0.5) / R)
+            ty = ndc_y * tan_half
+            for x in range(R):
+                ndc_x = (2.0 * (x + 0.5) / R) - 1.0
+                d = Vector((ndc_x * tan_half * aspect, ty, -1.0))
+                d.normalize()
+                cam_dirs.append(d)
+        return cam_dirs, None
 
-                if location:
-                    # Transform hit back to world space
-                    hit_world = obj_matrix @ location
-                    world_dist = (hit_world - ray_origin).length
+    ortho_scale = cam_data.ortho_scale
+    constant_dir = Vector((0.0, 0.0, -1.0))
+    cam_dirs = [constant_dir] * (R * R)
+    cam_offsets = []
+    for y in range(R):
+        ndc_y = 1.0 - (2.0 * (y + 0.5) / R)
+        off_y = ndc_y * ortho_scale / 2.0
+        for x in range(R):
+            ndc_x = (2.0 * (x + 0.5) / R) - 1.0
+            off_x = ndc_x * ortho_scale * aspect / 2.0
+            cam_offsets.append((off_x, off_y))
+    return cam_dirs, cam_offsets
 
-                    if world_dist < closest_dist:
-                        closest_dist = world_dist
-                        closest_hit = hit_world
 
-            if closest_hit:
-                # Check if hit is beyond near clipping plane
-                if closest_dist >= cam_data.clip_start:
-                    color = pixels[resolution - 1 - y, x, :3]
-                    results.append((closest_hit, color))
+def cast_scene_rays(
+    scene_bvh,
+    cam_matrix,
+    pixels,
+    cam_dirs,
+    cam_offsets,
+    resolution,
+    near_clip,
+    cam_type,
+    points_buf,
+    colors_buf,
+    write_offset,
+):
+    """
+    Cast precomputed rays for one frame against the merged scene BVH and
+    write hits into preallocated output buffers.
 
-    return results
+    Pixels with zero alpha (background — the renderer says nothing was hit)
+    are skipped entirely; that's often the bulk of pixels for sparse
+    geometry like vegetation.
+
+    Args:
+        scene_bvh: BVHTree from ``build_scene_bvh``
+        cam_matrix: camera.matrix_world for this frame
+        pixels: (R, R, 4) numpy array of RGBA float pixel data
+        cam_dirs: cam-space direction list from ``precompute_camera_rays``
+        cam_offsets: cam-space ORTHO offsets, or None for PERSP
+        resolution: square resolution R
+        near_clip: cam_data.clip_start (hoisted out of inner loop)
+        cam_type: "PERSP" or "ORTHO" (hoisted out of inner loop)
+        points_buf: preallocated (max_points, 3) float32 numpy buffer
+        colors_buf: preallocated (max_points, 3) float32 numpy buffer
+        write_offset: index in the buffers where this frame's hits start
+
+    Returns:
+        int: number of hits written this frame
+    """
+    if scene_bvh is None:
+        return 0
+
+    R = resolution
+    cam_rot = cam_matrix.to_3x3()
+    cam_origin = cam_matrix.translation
+
+    # Flip pixel rows once so flat index matches ray index (y*R + x).
+    pixels_flipped = pixels[::-1, :, :]
+    alpha_flat = pixels_flipped[:, :, 3].ravel()
+    colors_flat = pixels_flipped[:, :, :3].reshape(-1, 3)
+    hit_pixels = np.nonzero(alpha_flat > 0.0)[0]
+
+    if cam_type == "ORTHO":
+        world_right = cam_rot @ Vector((1.0, 0.0, 0.0))
+        world_up = cam_rot @ Vector((0.0, 1.0, 0.0))
+        constant_dir_world = cam_rot @ cam_dirs[0]
+        constant_dir_world.normalize()
+
+    written = 0
+    for ray_idx in hit_pixels:
+        if cam_type == "PERSP":
+            # Rotation preserves length and cam_dirs are pre-normalized, so
+            # no per-ray normalize is needed.
+            ray_dir = cam_rot @ cam_dirs[ray_idx]
+            ray_origin = cam_origin
+        else:
+            off_x, off_y = cam_offsets[ray_idx]
+            ray_origin = cam_origin + world_right * off_x + world_up * off_y
+            ray_dir = constant_dir_world
+
+        location, normal, index, dist = scene_bvh.ray_cast(ray_origin, ray_dir)
+        if location is None or dist < near_clip:
+            continue
+
+        slot = write_offset + written
+        points_buf[slot] = location
+        colors_buf[slot] = colors_flat[ray_idx]
+        written += 1
+
+    return written
